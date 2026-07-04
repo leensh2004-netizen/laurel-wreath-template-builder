@@ -15,7 +15,8 @@ from docx.shared import Pt, RGBColor
 from docx.text.paragraph import Paragraph
 from docx.table import _Cell, Table
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-
+from pathlib import Path
+from docx.shared import Inches
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "نموذج الايضاحات.docx"
 
@@ -161,6 +162,43 @@ def _find_section_ranges(doc: DocxDocument) -> Dict[str, Tuple[int, int]]:
     return ranges
 
 
+
+def insert_audit_logo_on_report_pages(doc, logo_path: str, width_inches: float = 1.4) -> None:
+    """
+    Replaces the placeholder text 'شعار مكتب التدقيق' with the audit logo.
+    This is safer than trying to use page numbers because Word page numbers
+    are not fixed inside python-docx.
+    """
+
+    logo = Path(logo_path)
+
+    if not logo.exists():
+        return
+
+    target_texts = [
+        "شعار مكتب التدقيق",
+        "شعار مكتب التدقيق ",
+    ]
+
+    replaced_count = 0
+
+    for paragraph in doc.paragraphs:
+        paragraph_text = paragraph.text.strip()
+
+        if paragraph_text in target_texts:
+            # Clear existing placeholder runs
+            for run in paragraph.runs:
+                run.text = ""
+
+            # Add the logo
+            run = paragraph.add_run()
+            run.add_picture(str(logo), width=Inches(width_inches))
+
+            replaced_count += 1
+
+            # Stop after replacing 2 logos, for report pages 2 and 3
+            if replaced_count >= 2:
+                break
 def extract_policy_section_texts(template_path: Path = TEMPLATE_PATH) -> Dict[str, str]:
     """Return the default text of each accounting policy section from the template.
 
@@ -750,7 +788,12 @@ def generate_document(
 
     if clear_replaced_format:
         remove_red_and_highlight_everywhere(doc)
-
+        
+    insert_audit_logo_on_report_pages(
+    doc,
+    logo_path="assets/logo.png",
+    width_inches=1.4)
+    
     bio = io.BytesIO()
     doc.save(bio)
     bio.seek(0)
