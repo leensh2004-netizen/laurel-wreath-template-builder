@@ -810,14 +810,7 @@ def generate_document(
 
         append_custom_sections(doc, custom_sections or [])
 
-    insert_audit_logo_on_report_pages(
-        doc,
-        logo_path="assets/logo.png",
-        width_inches=0.70
-    )
-
-    remove_empty_page_break_paragraphs(doc)
-
+    
     if clear_replaced_format:
         remove_red_and_highlight_everywhere(doc)
     
