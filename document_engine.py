@@ -161,40 +161,6 @@ def _find_section_ranges(doc: DocxDocument) -> Dict[str, Tuple[int, int]]:
         ranges[key] = (start, end)
     return ranges
 
-
-
-def insert_audit_logo_on_report_pages(doc, logo_path: str, width_inches: float = 0.70) -> None:
-    """
-    Replace 'شعار مكتب التدقيق' with the audit logo.
-    Handles normal paragraphs and table-cell paragraphs.
-    """
-
-    logo = Path(logo_path)
-
-    if not logo.exists():
-        return
-
-    target_text = "شعار مكتب التدقيق"
-    replaced_count = 0
-
-    for paragraph in _paragraphs_in_doc(doc):
-        if paragraph.text.strip() == target_text:
-            for run in paragraph.runs:
-                run.text = ""
-
-            paragraph.paragraph_format.space_before = Pt(0)
-            paragraph.paragraph_format.space_after = Pt(0)
-            paragraph.paragraph_format.line_spacing = 1
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-
-            run = paragraph.add_run()
-            run.add_picture(str(logo), width=Inches(width_inches))
-
-            replaced_count += 1
-
-            if replaced_count >= 2:
-                break
-
 def remove_empty_page_break_paragraphs(doc: DocxDocument) -> None:
     """
     Remove empty paragraphs that contain only page breaks.
@@ -774,6 +740,94 @@ def build_replacements(form: Dict[str, str]) -> Dict[str, str]:
     return {k: v for k, v in replacements.items() if v is not None}
 
 
+def insert_audit_logo_on_report_pages(doc, logo_path: str, width_inches: float = 0.70) -> None:
+    """
+    Replace 'شعار مكتب التدقيق' with the audit logo.
+    Searches normal paragraphs, tables, headers, and footers.
+    """
+
+    logo = Path(logo_path)
+
+    if not logo.exists():
+        return
+
+    target_text = "شعار مكتب التدقيق"
+    replaced_count = 0
+
+    for paragraph in _paragraphs_in_doc(doc):
+        if paragraph.text.strip() == target_text:
+            for run in paragraph.runs:
+                run.text = ""
+
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
+            paragraph.paragraph_format.line_spacing = 1
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+            run = paragraph.add_run()
+            run.add_picture(str(logo), width=Inches(width_inches))
+
+            replaced_count += 1
+
+            if replaced_count >= 2:
+                break
+
+
+def fix_blank_pages_from_section_breaks(doc: DocxDocument) -> None:
+    """
+    Fix blank pages caused by Word section breaks such as oddPage/evenPage
+    and remove empty page-break-only paragraphs.
+    """
+
+    body = doc.element.body
+
+    # 1) Convert odd/even section breaks to normal nextPage breaks.
+    # Odd/even section breaks can create an automatic blank page.
+    for sectPr in doc.element.xpath(".//w:sectPr"):
+        type_el = sectPr.find(qn("w:type"))
+        if type_el is not None:
+            value = type_el.get(qn("w:val"))
+            if value in ("oddPage", "evenPage"):
+                type_el.set(qn("w:val"), "nextPage")
+
+    # 2) Remove empty paragraphs that only contain a page break.
+    for el in list(body.iterchildren()):
+        if el.tag != qn("w:p"):
+            continue
+
+        text = _element_text(el)
+        xml = el.xml
+
+        has_picture = "w:drawing" in xml or "w:pict" in xml
+        has_text = bool(text)
+
+        has_page_break = (
+            'w:type="page"' in xml
+            or '<w:br w:type="page"' in xml
+            or "<w:br/>" in xml
+        )
+
+        has_section_properties = "w:sectPr" in xml
+
+        if not has_text and has_page_break and not has_picture and not has_section_properties:
+            delete_element(el)
+
+    # 3) Remove fully empty body paragraphs with no image and no section properties.
+    # Keep section paragraphs because deleting them can damage the document layout.
+    for el in list(body.iterchildren()):
+        if el.tag != qn("w:p"):
+            continue
+
+        text = _element_text(el)
+        xml = el.xml
+
+        has_picture = "w:drawing" in xml or "w:pict" in xml
+        has_section_properties = "w:sectPr" in xml
+        has_text = bool(text)
+
+        if not has_text and not has_picture and not has_section_properties:
+            delete_element(el)
+            
 def generate_document(
     form: Dict[str, str],
     partners: List[Dict[str, str]],
@@ -786,8 +840,10 @@ def generate_document(
     clear_replaced_format: bool = True,
 ) -> bytes:
     doc = Document(str(TEMPLATE_PATH))
+
     replacements = build_replacements(form)
     apply_replacements(doc, replacements, clear_replaced_format)
+
     fill_auditor_table(doc, form)
     fill_partners_table(doc, partners)
 
@@ -808,12 +864,19 @@ def generate_document(
     if cell_values:
         apply_cell_values(doc, cell_values)
 
-        append_custom_sections(doc, custom_sections or [])
+    append_custom_sections(doc, custom_sections or [])
 
-    
+    insert_audit_logo_on_report_pages(
+        doc,
+        logo_path="assets/logo.png",
+        width_inches=0.70
+    )
+
+    fix_blank_pages_from_section_breaks(doc)
+
     if clear_replaced_format:
         remove_red_and_highlight_everywhere(doc)
-    
+
     bio = io.BytesIO()
     doc.save(bio)
     bio.seek(0)
