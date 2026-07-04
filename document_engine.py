@@ -163,10 +163,10 @@ def _find_section_ranges(doc: DocxDocument) -> Dict[str, Tuple[int, int]]:
 
 
 
-def insert_audit_logo_on_report_pages(doc, logo_path: str, width_inches: float = 0.75) -> None:
+def insert_audit_logo_on_report_pages(doc, logo_path: str, width_inches: float = 0.70) -> None:
     """
     Replace the placeholder text 'شعار مكتب التدقيق' with the audit logo
-    without creating an extra blank page.
+    and remove nearby empty/page-break paragraphs that can create blank pages.
     """
 
     logo = Path(logo_path)
@@ -177,29 +177,47 @@ def insert_audit_logo_on_report_pages(doc, logo_path: str, width_inches: float =
     target_text = "شعار مكتب التدقيق"
     replaced_count = 0
 
-    for paragraph in doc.paragraphs:
+    for paragraph in list(doc.paragraphs):
         if paragraph.text.strip() == target_text:
-            # Clear the old placeholder text
+            # Clear old placeholder text
             for run in paragraph.runs:
                 run.text = ""
 
-            # Remove extra spacing so Word does not create a blank page
+            # Remove extra spacing
             paragraph.paragraph_format.space_before = Pt(0)
             paragraph.paragraph_format.space_after = Pt(0)
             paragraph.paragraph_format.line_spacing = 1
-
-            # Keep logo at the left side like the placeholder
             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-            # Add logo smaller
+            # Add logo
             run = paragraph.add_run()
             run.add_picture(str(logo), width=Inches(width_inches))
 
+            # Remove empty paragraphs immediately after the logo paragraph
+            next_el = paragraph._element.getnext()
+            removed = 0
+
+            while next_el is not None and removed < 5:
+                text = _element_text(next_el)
+
+                # Check if paragraph is empty or only contains a page break
+                xml = next_el.xml
+                is_empty = not text
+                has_page_break = 'w:type="page"' in xml or "w:br" in xml
+
+                if is_empty or has_page_break:
+                    temp = next_el.getnext()
+                    delete_element(next_el)
+                    next_el = temp
+                    removed += 1
+                else:
+                    break
+
             replaced_count += 1
 
-            # Stop after replacing 2 report-page placeholders
             if replaced_count >= 2:
                 break
+
 def extract_policy_section_texts(template_path: Path = TEMPLATE_PATH) -> Dict[str, str]:
     """Return the default text of each accounting policy section from the template.
 
@@ -793,7 +811,8 @@ def generate_document(
     insert_audit_logo_on_report_pages(
     doc,
     logo_path="assets/logo.png",
-    width_inches=1.4)
+    width_inches=0.70
+)
     
     bio = io.BytesIO()
     doc.save(bio)
