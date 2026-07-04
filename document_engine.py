@@ -827,7 +827,47 @@ def fix_blank_pages_from_section_breaks(doc: DocxDocument) -> None:
 
         if not has_text and not has_picture and not has_section_properties:
             delete_element(el)
-            
+
+
+def remove_r4_financial_statement_title(doc: DocxDocument) -> None:
+    """
+    Remove all instances of:
+    R4 ايضاحات القوائم المالية
+    R4 إيضاحات القوائم المالية
+    4R ايضاحات القوائم المالية
+    4R إيضاحات القوائم المالية
+
+    Works in normal paragraphs, tables, headers, and footers.
+    """
+
+    patterns = [
+        r"R4\s*[اإ]يضاحات\s+القوائم\s+المالية",
+        r"4R\s*[اإ]يضاحات\s+القوائم\s+المالية",
+        r"[اإ]يضاحات\s+القوائم\s+المالية\s*R4",
+        r"[اإ]يضاحات\s+القوائم\s+المالية\s*4R",
+    ]
+
+    for paragraph in list(_paragraphs_in_doc(doc)):
+        original_text = paragraph.text or ""
+        new_text = original_text
+
+        for pattern in patterns:
+            new_text = re.sub(pattern, "", new_text).strip()
+
+        if new_text != original_text:
+            # If the whole paragraph was only this title, delete the paragraph
+            if not new_text:
+                delete_element(paragraph._element)
+            else:
+                # Otherwise replace paragraph text while keeping paragraph position
+                if paragraph.runs:
+                    paragraph.runs[0].text = new_text
+                    for run in paragraph.runs[1:]:
+                        run.text = ""
+                else:
+                    paragraph.add_run(new_text)
+
+
 def generate_document(
     form: Dict[str, str],
     partners: List[Dict[str, str]],
@@ -873,6 +913,8 @@ def generate_document(
     )
 
     fix_blank_pages_from_section_breaks(doc)
+
+    remove_r4_financial_statement_title(doc)
 
     if clear_replaced_format:
         remove_red_and_highlight_everywhere(doc)
