@@ -163,11 +163,10 @@ def _find_section_ranges(doc: DocxDocument) -> Dict[str, Tuple[int, int]]:
 
 
 
-def insert_audit_logo_on_report_pages(doc, logo_path: str, width_inches: float = 1.4) -> None:
+def insert_audit_logo_on_report_pages(doc, logo_path: str, width_inches: float = 0.75) -> None:
     """
-    Replaces the placeholder text 'شعار مكتب التدقيق' with the audit logo.
-    This is safer than trying to use page numbers because Word page numbers
-    are not fixed inside python-docx.
+    Replace the placeholder text 'شعار مكتب التدقيق' with the audit logo
+    without creating an extra blank page.
     """
 
     logo = Path(logo_path)
@@ -175,28 +174,30 @@ def insert_audit_logo_on_report_pages(doc, logo_path: str, width_inches: float =
     if not logo.exists():
         return
 
-    target_texts = [
-        "شعار مكتب التدقيق",
-        "شعار مكتب التدقيق ",
-    ]
-
+    target_text = "شعار مكتب التدقيق"
     replaced_count = 0
 
     for paragraph in doc.paragraphs:
-        paragraph_text = paragraph.text.strip()
-
-        if paragraph_text in target_texts:
-            # Clear existing placeholder runs
+        if paragraph.text.strip() == target_text:
+            # Clear the old placeholder text
             for run in paragraph.runs:
                 run.text = ""
 
-            # Add the logo
+            # Remove extra spacing so Word does not create a blank page
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
+            paragraph.paragraph_format.line_spacing = 1
+
+            # Keep logo at the left side like the placeholder
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+            # Add logo smaller
             run = paragraph.add_run()
             run.add_picture(str(logo), width=Inches(width_inches))
 
             replaced_count += 1
 
-            # Stop after replacing 2 logos, for report pages 2 and 3
+            # Stop after replacing 2 report-page placeholders
             if replaced_count >= 2:
                 break
 def extract_policy_section_texts(template_path: Path = TEMPLATE_PATH) -> Dict[str, str]:
