@@ -15,7 +15,13 @@ from document_engine import (
     extract_policy_section_items,
     generate_document,
 )
-from trial_balance import build_note_rows, read_trial_balance, rows_to_financial_values, build_ppe_movement_cells, rows_to_cell_values
+from trial_balance import (
+    build_note_rows,
+    read_trial_balance,
+    rows_to_financial_values,
+    build_ppe_movement_cells,
+    rows_to_cell_values,
+)
 
 st.set_page_config(
     page_title="Laurel Wreath Template Builder",
@@ -217,7 +223,6 @@ if not TEMPLATE_PATH.exists():
     st.stop()
 
 
-
 @st.cache_data(show_spinner=False)
 def load_default_policy_items():
     return extract_policy_section_items()
@@ -233,16 +238,139 @@ def join_policy_items(items):
 
 default_policy_items = load_default_policy_items()
 
+
+# ------------------------------------------------------------
+# Automatic accounting policy selection by company/client type
+# ------------------------------------------------------------
+
+COMPANY_TYPES = [
+    "أخرى",
+    "صناعية",
+    "تجارية",
+    "خدمية",
+    "بنوك",
+    "تأمين",
+    "جمعيات خيرية و تعاونية",
+    "مستشفيات",
+    "مستوصفات",
+    "فنادق",
+    "استثمارات",
+    "مقاولات",
+    "عقارية",
+]
+
+# These are common accounting policies that usually stay included.
+# The manager/auditor can adjust this mapping later.
+CORE_POLICY_KEYS = [
+    "policy_basis",
+    "policy_currency",
+    "policy_foreign_currency",
+    "policy_capital",
+    "policy_cash",
+    "policy_receivables",
+    "policy_related_parties",
+    "policy_ppe",
+    "policy_impairment_nonfinancial",
+    "policy_offset",
+    "policy_payables",
+    "policy_tax",
+    "policy_revenue",
+    "policy_admin_expenses",
+    "policy_financial_instruments",
+    "policy_ecl",
+    "policy_ecl_measurement",
+    "policy_ecl_presentation",
+    "policy_writeoff",
+    "policy_financial_liabilities",
+]
+
+POLICY_PRESETS = {
+    "أخرى": CORE_POLICY_KEYS,
+
+    "صناعية": CORE_POLICY_KEYS + [
+        "policy_inventory",
+        "policy_loans",
+        "policy_borrowing",
+    ],
+
+    "تجارية": CORE_POLICY_KEYS + [
+        "policy_inventory",
+    ],
+
+    "خدمية": CORE_POLICY_KEYS,
+
+    "بنوك": CORE_POLICY_KEYS + [
+        "policy_loans",
+        "policy_borrowing",
+    ],
+
+    "تأمين": CORE_POLICY_KEYS,
+
+    "جمعيات خيرية و تعاونية": CORE_POLICY_KEYS,
+
+    "مستشفيات": CORE_POLICY_KEYS + [
+        "policy_inventory",
+    ],
+
+    "مستوصفات": CORE_POLICY_KEYS + [
+        "policy_inventory",
+    ],
+
+    "فنادق": CORE_POLICY_KEYS + [
+        "policy_inventory",
+        "policy_deferred_revenue",
+    ],
+
+    "استثمارات": CORE_POLICY_KEYS,
+
+    "مقاولات": CORE_POLICY_KEYS + [
+        "policy_inventory",
+        "policy_loans",
+        "policy_borrowing",
+        "policy_deferred_revenue",
+    ],
+
+    "عقارية": CORE_POLICY_KEYS + [
+        "policy_loans",
+        "policy_borrowing",
+        "policy_deferred_revenue",
+    ],
+}
+
+
+def apply_policy_preset(company_type_value: str) -> None:
+    selected_policy_keys = set(POLICY_PRESETS.get(company_type_value, CORE_POLICY_KEYS))
+
+    for sec in POLICY_SECTIONS:
+        st.session_state[f"sec_{sec.key}"] = sec.key in selected_policy_keys
+
+
+selected_company_type_for_policies = st.session_state.get("company_type_select", "أخرى")
+
+if selected_company_type_for_policies not in COMPANY_TYPES:
+    selected_company_type_for_policies = "أخرى"
+
+if st.session_state.get("last_policy_preset_company_type") != selected_company_type_for_policies:
+    apply_policy_preset(selected_company_type_for_policies)
+    st.session_state["last_policy_preset_company_type"] = selected_company_type_for_policies
+
+
 with st.sidebar:
     st.header("Document sections")
     st.caption("Uncheck any section that should be removed from the final Word document.")
 
     st.subheader("Accounting policies")
     included = set()
-    all_policy = st.checkbox("Keep all policy sections", value=True)
+
+    st.caption(f"Auto-selected based on company type: {selected_company_type_for_policies}")
+
+    if st.button("Re-apply automatic policy selection"):
+        apply_policy_preset(selected_company_type_for_policies)
+        st.session_state["last_policy_preset_company_type"] = selected_company_type_for_policies
+        st.rerun()
+
     for sec in POLICY_SECTIONS:
-        value = True if all_policy else sec.default
-        keep = st.checkbox(sec.title, value=value, key=f"sec_{sec.key}")
+        keep = st.checkbox(sec.title, key=f"sec_{sec.key}")
         if keep:
             included.add(sec.key)
 
@@ -256,6 +384,7 @@ with st.sidebar:
 
     clear_replaced_format = st.checkbox("Remove red/highlight from filled fields", value=True)
 
+
 main_tab, partners_tab, policies_tab, excel_tab, tables_tab, custom_tab, generate_tab = st.tabs([
     "1) Basic info",
     "2) Partners",
@@ -266,12 +395,20 @@ main_tab, partners_tab, policies_tab, excel_tab, tables_tab, custom_tab, generat
     "7) Generate",
 ])
 
+
 with main_tab:
     st.subheader("Company information")
     c1, c2 = st.columns(2)
     with c1:
         company_name = st.text_input("Company name / اسم الشركة")
-        company_type = st.text_input("Company type / نوع الشركة")
+
+        company_type = st.selectbox(
+            "Company type / نوع الشركة",
+            COMPANY_TYPES,
+            key="company_type_select",
+            help="This automatically selects the related accounting policy sections. You can still manually adjust them from the sidebar.",
+        )
+
         city = st.text_input("City / المدينة")
         country = st.text_input("Country / الدولة", value="الأردن")
         financial_year = st.text_input("Financial year phrase / السنة المالية")
@@ -297,6 +434,7 @@ with main_tab:
         audit_date = st.text_input("Audit report date / التاريخ")
         st.info("The app avoids replacing every 'اسم الشريك' globally because that phrase is also a partners-table header.")
 
+
 with partners_tab:
     st.subheader("Partners table")
     num_partners = st.number_input("Number of partners", min_value=0, max_value=30, value=2, step=1)
@@ -318,13 +456,16 @@ with partners_tab:
 # These will be populated in the Accounting policies tab and used in Generate.
 policy_text_edits = {}
 
+
 with policies_tab:
     st.subheader("Editable accounting policies / السياسات المحاسبية القابلة للتعديل")
     st.info(
-        "Each accounting policy is split into separate boxes: one box for the heading and one box for each point/paragraph. "
-        "Leave all boxes unchanged to preserve the original Word formatting. If you edit any box, that section will be rebuilt in the final document."
+        "Accounting policy sections are selected automatically based on the company type. "
+        "You can still manually include/remove any section from the left sidebar. "
+        "Leave all policy text boxes unchanged to preserve the original Word formatting. "
+        "If you edit any box, that section will be rebuilt in the final document."
     )
-    st.caption("Tip: use the checkboxes in the left sidebar to remove a full section from the final document.")
+    st.caption("Tip: choose the company type in Basic info, then review the selected policies in the left sidebar.")
 
     changed_count = 0
     for sec in POLICY_SECTIONS:
@@ -382,6 +523,7 @@ with policies_tab:
 # These will be populated in the Excel tab and used in Generate.
 financial_note_values = {}
 cell_values = {}
+
 
 with excel_tab:
     st.subheader("Upload trial balance Excel")
@@ -485,6 +627,7 @@ with excel_tab:
         if use_ppe_movements and tb_df is not None:
             cell_values = rows_to_cell_values(edited_ppe_rows)
 
+
 with tables_tab:
     st.subheader("Optional full table editor")
     st.warning("Use this only when you need to edit a table manually. If you only need trial-balance numbers, use the Excel numbers tab instead.")
@@ -506,6 +649,7 @@ with tables_tab:
         edited = st.data_editor(df, use_container_width=True, key=f"table_editor_{idx}")
         table_updates[idx] = edited.fillna("").astype(str).values.tolist()
 
+
 with custom_tab:
     st.subheader("Add custom sections")
     num_custom = st.number_input("Number of custom sections to append", min_value=0, max_value=10, value=0, step=1)
@@ -515,6 +659,7 @@ with custom_tab:
         title = st.text_input("Section title", key=f"custom_title_{i}")
         body = st.text_area("Section body", key=f"custom_body_{i}", height=120)
         custom_sections.append({"title": title, "body": body})
+
 
 with generate_tab:
     st.subheader("Generate final Word document")
