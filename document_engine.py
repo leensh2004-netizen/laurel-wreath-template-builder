@@ -975,7 +975,7 @@ def generate_document(
         width_inches=0.70
     )
 
-    fix_blank_pages_from_section_breaks(doc)
+    #fix_blank_pages_from_section_breaks(doc)
 
     remove_r4_financial_statement_title(doc)
 
