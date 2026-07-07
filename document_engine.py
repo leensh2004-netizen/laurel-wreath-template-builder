@@ -836,14 +836,15 @@ def insert_audit_logo_on_report_pages(doc, logo_path: str, width_inches: float =
 
 def fix_blank_pages_from_section_breaks(doc: DocxDocument) -> None:
     """
-    Fix blank pages caused by Word section breaks such as oddPage/evenPage
-    and remove empty page-break-only paragraphs.
+    Safer blank-page fix:
+    - Converts odd/even section breaks to normal nextPage breaks.
+    - Removes only paragraphs that contain a page break and no real content.
+    - Does NOT remove normal empty paragraphs, because those protect Arabic table layout.
     """
 
     body = doc.element.body
 
     # 1) Convert odd/even section breaks to normal nextPage breaks.
-    # Odd/even section breaks can create an automatic blank page.
     for sectPr in doc.element.xpath(".//w:sectPr"):
         type_el = sectPr.find(qn("w:type"))
         if type_el is not None:
@@ -851,42 +852,23 @@ def fix_blank_pages_from_section_breaks(doc: DocxDocument) -> None:
             if value in ("oddPage", "evenPage"):
                 type_el.set(qn("w:val"), "nextPage")
 
-    # 2) Remove empty paragraphs that only contain a page break.
+    # 2) Remove only empty paragraphs that contain a manual page break.
     for el in list(body.iterchildren()):
         if el.tag != qn("w:p"):
             continue
 
         text = _element_text(el)
         xml = el.xml
-
-        has_picture = "w:drawing" in xml or "w:pict" in xml
-        has_text = bool(text)
 
         has_page_break = (
             'w:type="page"' in xml
             or '<w:br w:type="page"' in xml
-            or "<w:br/>" in xml
         )
-
-        has_section_properties = "w:sectPr" in xml
-
-        if not has_text and has_page_break and not has_picture and not has_section_properties:
-            delete_element(el)
-
-    # 3) Remove fully empty body paragraphs with no image and no section properties.
-    # Keep section paragraphs because deleting them can damage the document layout.
-    for el in list(body.iterchildren()):
-        if el.tag != qn("w:p"):
-            continue
-
-        text = _element_text(el)
-        xml = el.xml
 
         has_picture = "w:drawing" in xml or "w:pict" in xml
         has_section_properties = "w:sectPr" in xml
-        has_text = bool(text)
 
-        if not has_text and not has_picture and not has_section_properties:
+        if not text and has_page_break and not has_picture and not has_section_properties:
             delete_element(el)
 
 
@@ -975,7 +957,7 @@ def generate_document(
         width_inches=0.70
     )
 
-    #fix_blank_pages_from_section_breaks(doc)
+    fix_blank_pages_from_section_breaks(doc)
 
     remove_r4_financial_statement_title(doc)
 
