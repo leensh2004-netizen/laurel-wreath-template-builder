@@ -11,7 +11,6 @@ from document_engine import (
     ALL_SECTIONS,
     TEMPLATE_PATH,
     extract_table_data,
-    extract_policy_section_texts,
     extract_policy_section_items,
     generate_document,
 )
@@ -240,7 +239,8 @@ default_policy_items = load_default_policy_items()
 
 
 # ------------------------------------------------------------
-# Automatic accounting policy selection by company/client type
+# Temporary policy mapping by company/client type
+# A version: stored only in Streamlit session for testing
 # ------------------------------------------------------------
 
 COMPANY_TYPES = [
@@ -259,100 +259,60 @@ COMPANY_TYPES = [
     "عقارية",
 ]
 
-# These are common accounting policies that usually stay included.
-# The manager/auditor can adjust this mapping later.
-CORE_POLICY_KEYS = [
-    "policy_basis",
-    "policy_currency",
-    "policy_foreign_currency",
-    "policy_capital",
-    "policy_cash",
-    "policy_receivables",
-    "policy_related_parties",
-    "policy_ppe",
-    "policy_impairment_nonfinancial",
-    "policy_offset",
-    "policy_payables",
-    "policy_tax",
-    "policy_revenue",
-    "policy_admin_expenses",
-    "policy_financial_instruments",
-    "policy_ecl",
-    "policy_ecl_measurement",
-    "policy_ecl_presentation",
-    "policy_writeoff",
-    "policy_financial_liabilities",
-]
 
-POLICY_PRESETS = {
-    "أخرى": CORE_POLICY_KEYS,
-
-    "صناعية": CORE_POLICY_KEYS + [
-        "policy_inventory",
-        "policy_loans",
-        "policy_borrowing",
-    ],
-
-    "تجارية": CORE_POLICY_KEYS + [
-        "policy_inventory",
-    ],
-
-    "خدمية": CORE_POLICY_KEYS,
-
-    "بنوك": CORE_POLICY_KEYS + [
-        "policy_loans",
-        "policy_borrowing",
-    ],
-
-    "تأمين": CORE_POLICY_KEYS,
-
-    "جمعيات خيرية و تعاونية": CORE_POLICY_KEYS,
-
-    "مستشفيات": CORE_POLICY_KEYS + [
-        "policy_inventory",
-    ],
-
-    "مستوصفات": CORE_POLICY_KEYS + [
-        "policy_inventory",
-    ],
-
-    "فنادق": CORE_POLICY_KEYS + [
-        "policy_inventory",
-        "policy_deferred_revenue",
-    ],
-
-    "استثمارات": CORE_POLICY_KEYS,
-
-    "مقاولات": CORE_POLICY_KEYS + [
-        "policy_inventory",
-        "policy_loans",
-        "policy_borrowing",
-        "policy_deferred_revenue",
-    ],
-
-    "عقارية": CORE_POLICY_KEYS + [
-        "policy_loans",
-        "policy_borrowing",
-        "policy_deferred_revenue",
-    ],
-}
+def policy_types_key(policy_key: str) -> str:
+    return f"policy_types_{policy_key}"
 
 
-def apply_policy_preset(company_type_value: str) -> None:
-    selected_policy_keys = set(POLICY_PRESETS.get(company_type_value, CORE_POLICY_KEYS))
+def initialize_policy_type_mapping() -> None:
+    """
+    Temporary A-version:
+    By default, every policy applies to every company type.
+    The manager can change the mapping using multi-select boxes.
+    Later we will save this mapping permanently in JSON.
+    """
+    for sec in POLICY_SECTIONS:
+        key = policy_types_key(sec.key)
+        if key not in st.session_state:
+            st.session_state[key] = COMPANY_TYPES.copy()
+
+
+def get_policy_keys_for_company_type(company_type_value: str) -> set:
+    selected_policy_keys = set()
+
+    for sec in POLICY_SECTIONS:
+        selected_types = st.session_state.get(policy_types_key(sec.key), [])
+        if company_type_value in selected_types:
+            selected_policy_keys.add(sec.key)
+
+    return selected_policy_keys
+
+
+def apply_policy_type_mapping(company_type_value: str) -> None:
+    selected_policy_keys = get_policy_keys_for_company_type(company_type_value)
 
     for sec in POLICY_SECTIONS:
         st.session_state[f"sec_{sec.key}"] = sec.key in selected_policy_keys
 
+
+initialize_policy_type_mapping()
 
 selected_company_type_for_policies = st.session_state.get("company_type_select", "أخرى")
 
 if selected_company_type_for_policies not in COMPANY_TYPES:
     selected_company_type_for_policies = "أخرى"
 
-if st.session_state.get("last_policy_preset_company_type") != selected_company_type_for_policies:
-    apply_policy_preset(selected_company_type_for_policies)
-    st.session_state["last_policy_preset_company_type"] = selected_company_type_for_policies
+should_apply_mapping = False
+
+if st.session_state.get("last_policy_mapping_company_type") != selected_company_type_for_policies:
+    should_apply_mapping = True
+
+if st.session_state.pop("pending_apply_policy_mapping", False):
+    should_apply_mapping = True
+
+if should_apply_mapping:
+    apply_policy_type_mapping(selected_company_type_for_policies)
+    st.session_state["last_policy_mapping_company_type"] = selected_company_type_for_policies
 
 
 with st.sidebar:
@@ -362,11 +322,10 @@ with st.sidebar:
     st.subheader("Accounting policies")
     included = set()
 
-    st.caption(f"Auto-selected based on company type: {selected_company_type_for_policies}")
+    st.caption(f"Selected based on company type: {selected_company_type_for_policies}")
 
-    if st.button("Re-apply automatic policy selection"):
-        apply_policy_preset(selected_company_type_for_policies)
-        st.session_state["last_policy_preset_company_type"] = selected_company_type_for_policies
+    if st.button("Apply policy mapping for this company type"):
+        st.session_state["pending_apply_policy_mapping"] = True
         st.rerun()
 
     for sec in POLICY_SECTIONS:
@@ -406,7 +365,7 @@ with main_tab:
             "Company type / نوع الشركة",
             COMPANY_TYPES,
             key="company_type_select",
-            help="This automatically selects the related accounting policy sections. You can still manually adjust them from the sidebar.",
+            help="This selects the related accounting policy sections based on the policy mapping. You can still manually adjust them from the sidebar.",
         )
 
         city = st.text_input("City / المدينة")
@@ -460,12 +419,34 @@ policy_text_edits = {}
 with policies_tab:
     st.subheader("Editable accounting policies / السياسات المحاسبية القابلة للتعديل")
     st.info(
-        "Accounting policy sections are selected automatically based on the company type. "
-        "You can still manually include/remove any section from the left sidebar. "
-        "Leave all policy text boxes unchanged to preserve the original Word formatting. "
-        "If you edit any box, that section will be rebuilt in the final document."
+        "For each accounting policy, choose which company/client types it applies to. "
+        "Then choose the company type in Basic info. The sidebar will include matching policies automatically. "
+        "This is temporary for now; later we will save the mapping permanently."
     )
-    st.caption("Tip: choose the company type in Basic info, then review the selected policies in the left sidebar.")
+    st.caption("Tip: open the mapping editor below, choose types for each policy, then click Apply mapping now.")
+
+    st.divider()
+    st.subheader("Policy type mapping / ربط السياسات بنوع الشركة")
+
+    with st.expander("Edit policy-to-company-type mapping", expanded=False):
+        st.warning(
+            "Temporary version: these choices stay during this app session only. "
+            "Later we will save them in a JSON file."
+        )
+
+        for sec in POLICY_SECTIONS:
+            st.multiselect(
+                sec.title,
+                COMPANY_TYPES,
+                key=policy_types_key(sec.key),
+                help="Choose which company/client types should include this accounting policy.",
+            )
+
+        if st.button("Apply mapping now"):
+            st.session_state["pending_apply_policy_mapping"] = True
+            st.rerun()
+
+    st.divider()
 
     changed_count = 0
     for sec in POLICY_SECTIONS:
