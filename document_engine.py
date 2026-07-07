@@ -949,13 +949,16 @@ def generate_document(
     if policy_text_edits:
         apply_policy_text_edits(doc, policy_text_edits)
 
+    # IMPORTANT:
+    # Apply manual table replacements BEFORE removing sections,
+    # because table indexes come from the original Word template.
+    if table_updates:
+        apply_table_data(doc, table_updates)
+
     included = set(included_section_keys)
     all_keys = {s.key for s in ALL_SECTIONS}
     remove_keys = all_keys - included
     remove_sections(doc, remove_keys)
-
-    if table_updates:
-        apply_table_data(doc, table_updates)
 
     if financial_note_values:
         apply_financial_note_values(doc, financial_note_values)
