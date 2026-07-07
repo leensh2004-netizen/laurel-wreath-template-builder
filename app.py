@@ -654,7 +654,6 @@ with financial_tables_tab:
 
     used_table_indexes = set()
 
-    
     for i in range(st.session_state["financial_table_replacement_count"]):
         with st.expander(f"Table replacement {i + 1}", expanded=True):
             selected_option = st.selectbox(
@@ -667,6 +666,15 @@ with financial_tables_tab:
             used_table_indexes.add(target_table_index)
 
             selected_table_info = table_infos[target_table_index]
+            original_data = selected_table_info.get("data", [])
+
+            original_rows = len(original_data) if original_data else 1
+            original_cols = max((len(row) for row in original_data), default=1)
+
+            normalized_original = [
+                row + [""] * (original_cols - len(row))
+                for row in original_data
+            ]
 
             show_preview = st.checkbox(
                 "Show original Word table preview",
@@ -675,13 +683,7 @@ with financial_tables_tab:
             )
 
             if show_preview:
-                original_data = selected_table_info.get("data", [])
-                if original_data:
-                    original_max_cols = max(len(row) for row in original_data)
-                    normalized_original = [
-                        row + [""] * (original_max_cols - len(row))
-                        for row in original_data
-                    ]
+                if normalized_original:
                     st.dataframe(
                         pd.DataFrame(normalized_original),
                         use_container_width=True,
@@ -690,38 +692,47 @@ with financial_tables_tab:
                 else:
                     st.write("No preview available for this table.")
 
-            st.markdown("**Build the replacement table:**")
-            st.caption("Write the table exactly as you want it to appear. Include the header row too.")
+            st.markdown("**Edit the replacement table:**")
+            st.caption(
+                "The original Word table is loaded below. Edit the cells directly. "
+                "Columns are locked to protect the Word layout."
+            )
 
             rows = st.number_input(
                 "Number of rows",
                 min_value=1,
                 max_value=50,
-                value=4,
+                value=original_rows,
                 step=1,
-                key=f"financial_table_rows_{i}",
+                key=f"financial_table_rows_{i}_{target_table_index}",
             )
 
             cols = st.number_input(
                 "Number of columns",
                 min_value=1,
                 max_value=10,
-                value=3,
+                value=original_cols,
                 step=1,
-                key=f"financial_table_cols_{i}",
+                key=f"financial_table_cols_{i}_{target_table_index}",
+                disabled=True,
+                help="Columns are locked to protect the Word layout. Add/remove rows only.",
             )
 
             default_df = pd.DataFrame(
-                [["" for _ in range(int(cols))] for _ in range(int(rows))],
-                columns=[f"Column {c + 1}" for c in range(int(cols))],
+                [["" for _ in range(original_cols)] for _ in range(int(rows))],
+                columns=[f"Cell {c + 1}" for c in range(original_cols)],
             )
+
+            for r in range(min(int(rows), len(normalized_original))):
+                for c in range(original_cols):
+                    default_df.iat[r, c] = normalized_original[r][c]
 
             edited_df = st.data_editor(
                 default_df,
                 use_container_width=True,
                 hide_index=True,
                 num_rows="dynamic",
-                key=f"financial_table_editor_{i}",
+                key=f"financial_table_editor_{i}_{target_table_index}_{int(rows)}",
             )
 
             replacement_data = edited_df.fillna("").astype(str).values.tolist()
@@ -731,7 +742,6 @@ with financial_tables_tab:
                 st.success(f"This will replace Word table {target_table_index}.")
             else:
                 st.warning("This replacement table is empty, so it will not be applied.")
-
 
 
 with generate_tab:
