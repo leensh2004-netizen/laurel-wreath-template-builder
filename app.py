@@ -441,23 +441,30 @@ policy_text_edits = {}
 with policies_tab:
     st.subheader("Editable accounting policies / السياسات المحاسبية القابلة للتعديل")
     st.info(
-        "For each accounting policy, choose which company/client types it applies to. "
-        "Then choose the company type in Basic info. The sidebar will include matching policies automatically. "
-        "This is temporary for now; later we will save the mapping permanently."
+        "For each accounting policy, first choose which company/client types it applies to, "
+        "then edit the policy wording if needed. "
+        "Choose the company type in Basic info, then click Apply policy mapping to update the sidebar."
     )
-    st.caption("Tip: open the mapping editor below, choose types for each policy, then click Apply mapping now.")
+
+    if st.button("Apply policy mapping now"):
+        st.session_state["pending_apply_policy_mapping"] = True
+        st.rerun()
 
     st.divider()
-    st.subheader("Policy type mapping / ربط السياسات بنوع الشركة")
 
-    with st.expander("Edit policy-to-company-type mapping", expanded=False):
-        st.warning(
-            "Temporary version: these choices stay during this app session only. "
-            "Later we will save them in a JSON file."
-        )
+    changed_count = 0
 
-        for sec in POLICY_SECTIONS:
-            st.markdown(f"### {sec.title}")
+    for sec in POLICY_SECTIONS:
+        included_now = sec.key in included
+        default_items = default_policy_items.get(sec.key, [sec.title])
+        if not default_items:
+            default_items = [sec.title]
+
+        with st.expander(
+            f"{sec.title}" + ("" if included_now else "  — removed for selected company type"),
+            expanded=(sec.key == "policy_basis"),
+        ):
+            st.markdown("**1) Choose which company/client types this policy applies to:**")
 
             c1, c2, c3, c4, c5 = st.columns(5)
 
@@ -483,66 +490,60 @@ with policies_tab:
 
             sync_policy_type_list_from_checkboxes(sec.key)
 
+            selected_types = st.session_state.get(policy_types_key(sec.key), [])
+            if selected_company_type_for_policies in selected_types:
+                st.success(f"This policy applies to: {selected_company_type_for_policies}")
+            else:
+                st.warning(f"This policy does not apply to: {selected_company_type_for_policies}")
+
             st.divider()
 
-        if st.button("Apply mapping now"):
-            st.session_state["pending_apply_policy_mapping"] = True
-            st.rerun()
+            st.markdown("**2) Edit policy text:**")
 
-    st.divider()
-
-    changed_count = 0
-    for sec in POLICY_SECTIONS:
-        included_now = sec.key in included
-        default_items = default_policy_items.get(sec.key, [sec.title])
-        if not default_items:
-            default_items = [sec.title]
-
-        with st.expander(f"{sec.title}" + ("" if included_now else "  — removed in sidebar"), expanded=(sec.key == "policy_basis")):
             col_a, col_b, col_c = st.columns([3, 1, 1])
             with col_a:
-                st.markdown("**Edit each box separately:**")
+                st.caption("Leave unchanged to preserve original Word formatting.")
             with col_b:
-                if st.button("Reset section", key=f"reset_{sec.key}"):
+                if st.button("Reset text", key=f"reset_{sec.key}"):
                     for j, item in enumerate(default_items):
                         st.session_state[f"policy_item_{sec.key}_{j}"] = item
             with col_c:
                 st.write("Included ✅" if included_now else "Removed ❌")
 
             edited_items = []
+
             for j, default_item in enumerate(default_items):
                 item_key = f"policy_item_{sec.key}_{j}"
+
                 if item_key not in st.session_state:
                     st.session_state[item_key] = default_item
 
                 if j == 0:
-                    label = "Section heading / عنوان القسم"
-                    help_text = "This is separate from the policy points below."
                     edited_value = st.text_input(
-                        label,
+                        "Section heading / عنوان القسم",
                         key=item_key,
                         disabled=not included_now,
-                        help=help_text,
+                        help="This is separate from the policy points below.",
                     )
                 else:
-                    label = f"Point / paragraph {j}"
                     height = 115 if len(str(default_item)) < 450 else 190
                     edited_value = st.text_area(
-                        label,
+                        f"Point / paragraph {j}",
                         key=item_key,
                         height=height,
                         disabled=not included_now,
                     )
+
                 edited_items.append(edited_value)
 
             default_joined = join_policy_items(default_items)
             edited_joined = join_policy_items(edited_items)
+
             if included_now and normalize_text_for_compare(edited_joined) != normalize_text_for_compare(default_joined):
                 policy_text_edits[sec.key] = edited_joined
                 changed_count += 1
 
     st.success(f"Edited policy sections ready to apply: {changed_count}")
-
 
 # These will be populated in the Excel tab and used in Generate.
 financial_note_values = {}
