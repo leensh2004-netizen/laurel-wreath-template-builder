@@ -268,6 +268,10 @@ def policy_type_checkbox_key(policy_key: str, company_type: str) -> str:
     safe_type = company_type.replace(" ", "_")
     return f"policy_type_checkbox_{policy_key}_{safe_type}"
 
+def custom_policy_type_checkbox_key(index: int, company_type: str) -> str:
+    safe_type = company_type.replace(" ", "_")
+    return f"custom_policy_type_checkbox_{index}_{safe_type}"
+
 
 def initialize_policy_type_mapping() -> None:
     """
@@ -366,14 +370,13 @@ with st.sidebar:
     clear_replaced_format = st.checkbox("Remove red/highlight from filled fields", value=True)
 
 
-main_tab, partners_tab, policies_tab, excel_tab, tables_tab, custom_tab, generate_tab = st.tabs([
+main_tab, partners_tab, policies_tab, excel_tab, tables_tab, generate_tab = st.tabs([
     "1) Basic info",
     "2) Partners",
     "3) Accounting policies",
     "4) Excel numbers",
     "5) Optional table editor",
-    "6) Add custom sections",
-    "7) Generate",
+    "6) Generate",
 ])
 
 
@@ -433,9 +436,9 @@ with partners_tab:
             percentage = st.text_input("Percentage", key=f"partner_pct_{i}")
         partners.append({"name": name, "shares": shares, "value": value, "percentage": percentage})
 
-
 # These will be populated in the Accounting policies tab and used in Generate.
 policy_text_edits = {}
+custom_sections = []
 
 
 with policies_tab:
@@ -545,6 +548,79 @@ with policies_tab:
                 changed_count += 1
 
     st.success(f"Edited policy sections ready to apply: {changed_count}")
+    st.divider()
+    st.subheader("Add new accounting policies / إضافة سياسات محاسبية جديدة")
+
+    if "custom_policy_count" not in st.session_state:
+        st.session_state["custom_policy_count"] = 0
+
+    if st.button("➕ Add new accounting policy"):
+        st.session_state["custom_policy_count"] += 1
+        st.rerun()
+
+    for i in range(st.session_state["custom_policy_count"]):
+        with st.expander(f"New accounting policy {i + 1}", expanded=True):
+            st.markdown("**1) Choose which company/client types this new policy applies to:**")
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+
+            for idx, company_type_value in enumerate(COMPANY_TYPES):
+                checkbox_key = custom_policy_type_checkbox_key(i, company_type_value)
+
+                if checkbox_key not in st.session_state:
+                    st.session_state[checkbox_key] = True
+
+                if idx % 5 == 0:
+                    col = c1
+                elif idx % 5 == 1:
+                    col = c2
+                elif idx % 5 == 2:
+                    col = c3
+                elif idx % 5 == 3:
+                    col = c4
+                else:
+                    col = c5
+
+                with col:
+                    st.checkbox(
+                        company_type_value,
+                        key=checkbox_key,
+                    )
+
+            custom_selected_types = [
+                company_type_value
+                for company_type_value in COMPANY_TYPES
+                if st.session_state.get(custom_policy_type_checkbox_key(i, company_type_value), False)
+            ]
+
+            custom_included_now = selected_company_type_for_policies in custom_selected_types
+
+            if custom_included_now:
+                st.success(f"This new policy applies to: {selected_company_type_for_policies}")
+            else:
+                st.warning(f"This new policy does not apply to: {selected_company_type_for_policies}")
+
+            st.divider()
+            st.markdown("**2) Write the new policy text:**")
+
+            custom_title = st.text_input(
+                "Policy title / عنوان السياسة",
+                key=f"custom_policy_title_{i}",
+                disabled=not custom_included_now,
+            )
+
+            custom_body = st.text_area(
+                "Policy description / نص السياسة",
+                key=f"custom_policy_body_{i}",
+                height=160,
+                disabled=not custom_included_now,
+            )
+
+            if custom_included_now and custom_title.strip():
+                custom_sections.append({
+                    "title": custom_title,
+                    "body": custom_body,
+                })
 
 # These will be populated in the Excel tab and used in Generate.
 financial_note_values = {}
@@ -675,16 +751,6 @@ with tables_tab:
         edited = st.data_editor(df, use_container_width=True, key=f"table_editor_{idx}")
         table_updates[idx] = edited.fillna("").astype(str).values.tolist()
 
-
-with custom_tab:
-    st.subheader("Add custom sections")
-    num_custom = st.number_input("Number of custom sections to append", min_value=0, max_value=10, value=0, step=1)
-    custom_sections = []
-    for i in range(int(num_custom)):
-        st.markdown(f"**Custom section {i + 1}**")
-        title = st.text_input("Section title", key=f"custom_title_{i}")
-        body = st.text_area("Section body", key=f"custom_body_{i}", height=120)
-        custom_sections.append({"title": title, "body": body})
 
 
 with generate_tab:
