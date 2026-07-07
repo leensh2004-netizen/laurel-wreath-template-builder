@@ -654,6 +654,7 @@ with financial_tables_tab:
 
     used_table_indexes = set()
 
+    
     for i in range(st.session_state["financial_table_replacement_count"]):
         with st.expander(f"Table replacement {i + 1}", expanded=True):
             selected_option = st.selectbox(
@@ -667,7 +668,13 @@ with financial_tables_tab:
 
             selected_table_info = table_infos[target_table_index]
 
-            with st.expander("Preview original Word table", expanded=False):
+            show_preview = st.checkbox(
+                "Show original Word table preview",
+                value=False,
+                key=f"show_original_table_preview_{i}",
+            )
+
+            if show_preview:
                 original_data = selected_table_info.get("data", [])
                 if original_data:
                     original_max_cols = max(len(row) for row in original_data)
