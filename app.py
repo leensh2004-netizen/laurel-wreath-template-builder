@@ -441,12 +441,13 @@ policy_text_edits = {}
 with policies_tab:
     st.subheader("Editable accounting policies / السياسات المحاسبية القابلة للتعديل")
     st.info(
-        "For each accounting policy, first choose which company/client types it applies to, "
-        "then edit the policy wording if needed. "
-        "Choose the company type in Basic info, then click Apply policy mapping to update the sidebar."
+        "For each accounting policy, choose which company/client types it applies to, "
+    "then edit the policy wording if needed. "
+    "After changing the checkboxes, click 'Update included policies from checkboxes' "
+    "to refresh the sidebar."
     )
 
-    if st.button("Apply policy mapping now"):
+    if st.button("Update included policies from checkboxes"):
         st.session_state["pending_apply_policy_mapping"] = True
         st.rerun()
 
