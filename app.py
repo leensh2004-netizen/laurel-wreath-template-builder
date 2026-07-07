@@ -370,7 +370,7 @@ with st.sidebar:
     clear_replaced_format = st.checkbox("Remove red/highlight from filled fields", value=True)
 
 
-main_tab, partners_tab, policies_tab, excel_tab, tables_tab, generate_tab = st.tabs([
+main_tab, partners_tab, policies_tab, financial_tables_tab, generate_tab = st.tabs([
     "1) Basic info",
     "2) Partners",
     "3) Accounting policies",
@@ -755,8 +755,7 @@ with generate_tab:
     st.write("Policy sections edited:", len(policy_text_edits))
     st.write("Financial note rows ready to update:", len(financial_note_values))
     st.write("Movement-table cells ready to update:", len(cell_values))
-    if len(financial_note_values) == 0:
-        st.info("No financial note rows are currently ready. Go to the Excel numbers tab, upload the trial balance, and keep 'Use these numbers' checked.")
+    st.write("Manual table replacements ready:", len(table_updates))
     missing_required = []
     if not company_name:
         missing_required.append("Company name")
