@@ -538,19 +538,79 @@ def extract_table_data(template_path: Path = TEMPLATE_PATH) -> List[Dict[str, ob
     return result
 
 
-def apply_table_data(doc: DocxDocument, table_updates: Dict[int, List[List[str]]]) -> None:
-    for idx, data in table_updates.items():
-        if idx < 0 or idx >= len(doc.tables):
+def remove_table_row(table, row_index: int) -> None:
+    row = table.rows[row_index]
+    tbl = table._tbl
+    tbl.remove(row._tr)
+
+
+def remove_table_column(table, col_index: int) -> None:
+    for row in table.rows:
+        cell = row.cells[col_index]
+        tc = cell._tc
+        tc.getparent().remove(tc)
+
+    tbl_grid = table._tbl.tblGrid
+    if tbl_grid is not None:
+        grid_cols = list(tbl_grid.gridCol_lst)
+        if col_index < len(grid_cols):
+            tbl_grid.remove(grid_cols[col_index])
+
+
+def resize_word_table(table, target_rows: int, target_cols: int) -> None:
+    target_rows = max(1, int(target_rows))
+    target_cols = max(1, int(target_cols))
+
+    while len(table.rows) < target_rows:
+        table.add_row()
+
+    while len(table.rows) > target_rows:
+        remove_table_row(table, len(table.rows) - 1)
+
+    current_cols = len(table.rows[0].cells) if table.rows else 0
+
+    while current_cols < target_cols:
+        table.add_column(914400)  # about 1 inch in EMUs
+        current_cols += 1
+
+    while current_cols > target_cols:
+        remove_table_column(table, current_cols - 1)
+        current_cols -= 1
+
+
+def apply_table_data(doc, table_updates):
+    if not table_updates:
+        return
+
+    for table_index, data in table_updates.items():
+        table_index = int(table_index)
+
+        if table_index < 0 or table_index >= len(doc.tables):
             continue
-        table = doc.tables[idx]
-        for r_idx, row_data in enumerate(data):
-            if r_idx >= len(table.rows):
-                break
-            row = table.rows[r_idx]
-            for c_idx, value in enumerate(row_data):
-                if c_idx >= len(row.cells):
-                    break
-                set_cell_text(row.cells[c_idx], value)
+
+        if not data:
+            continue
+
+        max_cols = max(len(row) for row in data)
+        if max_cols == 0:
+            continue
+
+        normalized_data = [
+            [str(cell or "") for cell in row] + [""] * (max_cols - len(row))
+            for row in data
+        ]
+
+        table = doc.tables[table_index]
+
+        resize_word_table(
+            table,
+            target_rows=len(normalized_data),
+            target_cols=max_cols,
+        )
+
+        for row_index, row_data in enumerate(normalized_data):
+            for col_index, value in enumerate(row_data):
+                table.cell(row_index, col_index).text = value
 
 
 
