@@ -953,8 +953,8 @@ def generate_document(
     # IMPORTANT:
     # Apply manual table replacements BEFORE removing sections,
     # because table indexes come from the original Word template.
-    if table_updates:
-        apply_table_data(doc, table_updates)
+    #if table_updates:
+        #apply_table_data(doc, table_updates)
 
     included = set(included_section_keys)
     all_keys = {s.key for s in ALL_SECTIONS}
