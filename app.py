@@ -264,17 +264,41 @@ def policy_types_key(policy_key: str) -> str:
     return f"policy_types_{policy_key}"
 
 
+def policy_type_checkbox_key(policy_key: str, company_type: str) -> str:
+    safe_type = company_type.replace(" ", "_")
+    return f"policy_type_checkbox_{policy_key}_{safe_type}"
+
+
 def initialize_policy_type_mapping() -> None:
     """
     Temporary A-version:
     By default, every policy applies to every company type.
-    The manager can change the mapping using multi-select boxes.
+    The manager can change the mapping using checkbox boxes.
     Later we will save this mapping permanently in JSON.
     """
     for sec in POLICY_SECTIONS:
-        key = policy_types_key(sec.key)
-        if key not in st.session_state:
-            st.session_state[key] = COMPANY_TYPES.copy()
+        list_key = policy_types_key(sec.key)
+
+        if list_key not in st.session_state:
+            st.session_state[list_key] = COMPANY_TYPES.copy()
+
+        selected_types = set(st.session_state.get(list_key, []))
+
+        for company_type_value in COMPANY_TYPES:
+            checkbox_key = policy_type_checkbox_key(sec.key, company_type_value)
+            if checkbox_key not in st.session_state:
+                st.session_state[checkbox_key] = company_type_value in selected_types
+
+
+def sync_policy_type_list_from_checkboxes(policy_key: str) -> None:
+    selected_types = []
+
+    for company_type_value in COMPANY_TYPES:
+        checkbox_key = policy_type_checkbox_key(policy_key, company_type_value)
+        if st.session_state.get(checkbox_key, False):
+            selected_types.append(company_type_value)
+
+    st.session_state[policy_types_key(policy_key)] = selected_types
 
 
 def get_policy_keys_for_company_type(company_type_value: str) -> set:
@@ -293,8 +317,6 @@ def apply_policy_type_mapping(company_type_value: str) -> None:
 
     for sec in POLICY_SECTIONS:
         st.session_state[f"sec_{sec.key}"] = sec.key in selected_policy_keys
-
-
 initialize_policy_type_mapping()
 
 selected_company_type_for_policies = st.session_state.get("company_type_select", "أخرى")
@@ -435,12 +457,33 @@ with policies_tab:
         )
 
         for sec in POLICY_SECTIONS:
-            st.multiselect(
-                sec.title,
-                COMPANY_TYPES,
-                key=policy_types_key(sec.key),
-                help="Choose which company/client types should include this accounting policy.",
-            )
+            st.markdown(f"### {sec.title}")
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+
+            for idx, company_type_value in enumerate(COMPANY_TYPES):
+                checkbox_key = policy_type_checkbox_key(sec.key, company_type_value)
+
+                if idx % 5 == 0:
+                    col = c1
+                elif idx % 5 == 1:
+                    col = c2
+                elif idx % 5 == 2:
+                    col = c3
+                elif idx % 5 == 3:
+                    col = c4
+                else:
+                    col = c5
+
+                with col:
+                    st.checkbox(
+                        company_type_value,
+                        key=checkbox_key,
+                    )
+
+            sync_policy_type_list_from_checkboxes(sec.key)
+
+            st.divider()
 
         if st.button("Apply mapping now"):
             st.session_state["pending_apply_policy_mapping"] = True
