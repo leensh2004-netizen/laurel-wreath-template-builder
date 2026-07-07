@@ -657,37 +657,49 @@ with excel_tab:
             st.error(f"Could not read this Excel file: {exc}")
             tb_df = None
 
-    st.subheader("Editable extracted note numbers")
-    st.caption("These cells are editable. If the extracted number is wrong or changed later, type the correct number here before generating the Word document.")
+    st.subheader("Extracted Excel numbers")
+    st.caption(
+        "After uploading a trial balance, the app will show the extracted numbers here. "
+        "Nothing is shown before upload because the old default rows were not related to this workflow."
+    )
 
     if tb_df is None:
-        st.info("Upload a trial balance to extract financial note numbers. No numbers will be written to the Word document until an Excel file is loaded.")
-        default_rows = build_note_rows(None, round_to_whole_dinars=round_to_whole_dinars)
-        use_financial_numbers = False
+        st.info("Upload a trial balance Excel file first. No number table will be shown until an Excel file is loaded.")
     else:
-        use_financial_numbers = st.checkbox("Use these numbers in the generated Word document", value=True)
-        default_rows = build_note_rows(tb_df, round_to_whole_dinars=round_to_whole_dinars)
+        use_financial_numbers = st.checkbox(
+            "Use these extracted numbers in the generated Word document",
+            value=True,
+        )
 
-    edited_note_rows = st.data_editor(
-        default_rows,
-        use_container_width=True,
-        hide_index=True,
-        height=520,
-        disabled=["section", "table_index", "row_index", "label", "matched_groups"],
-        column_config={
-            "include": st.column_config.CheckboxColumn("Include", help="Uncheck if you do not want this row changed in the Word document."),
-            "section": st.column_config.TextColumn("Section"),
-            "table_index": st.column_config.NumberColumn("Table", format="%d"),
-            "row_index": st.column_config.NumberColumn("Row", format="%d"),
-            "label": st.column_config.TextColumn("Line item"),
-            "current_year": st.column_config.TextColumn("2024 / current year - editable"),
-            "previous_year": st.column_config.TextColumn("2023 / previous year - editable"),
-            "matched_groups": st.column_config.TextColumn("Matched Excel المجموعة"),
-        },
-        key="financial_note_editor",
-    )
-    if use_financial_numbers and tb_df is not None:
-        financial_note_values = rows_to_financial_values(edited_note_rows)
+        default_rows = build_note_rows(
+            tb_df,
+            round_to_whole_dinars=round_to_whole_dinars,
+        )
+
+        edited_note_rows = st.data_editor(
+            default_rows,
+            use_container_width=True,
+            hide_index=True,
+            height=520,
+            disabled=["section", "table_index", "row_index", "label", "matched_groups"],
+            column_config={
+                "include": st.column_config.CheckboxColumn(
+                    "Include",
+                    help="Uncheck if you do not want this row changed in the Word document.",
+                ),
+                "section": st.column_config.TextColumn("Section"),
+                "table_index": st.column_config.NumberColumn("Table", format="%d"),
+                "row_index": st.column_config.NumberColumn("Row", format="%d"),
+                "label": st.column_config.TextColumn("Line item"),
+                "current_year": st.column_config.TextColumn("Current year - editable"),
+                "previous_year": st.column_config.TextColumn("Previous year - editable"),
+                "matched_groups": st.column_config.TextColumn("Matched Excel المجموعة"),
+            },
+            key="financial_note_editor",
+        )
+
+        if use_financial_numbers:
+            financial_note_values = rows_to_financial_values(edited_note_rows)
 
     st.divider()
     st.subheader("V10: Fixed asset movement table suggestions")
