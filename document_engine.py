@@ -591,26 +591,27 @@ def apply_table_data(doc, table_updates):
         if not data:
             continue
 
-        max_cols = max(len(row) for row in data)
-        if max_cols == 0:
-            continue
-
-        normalized_data = [
-            [str(cell or "") for cell in row] + [""] * (max_cols - len(row))
-            for row in data
-        ]
-
         table = doc.tables[table_index]
 
-        resize_word_table(
-            table,
-            target_rows=len(normalized_data),
-            target_cols=max_cols,
-        )
+        # Add rows only if needed. Do NOT add/remove columns.
+        while len(table.rows) < len(data):
+            table.add_row()
 
-        for row_index, row_data in enumerate(normalized_data):
-            for col_index, value in enumerate(row_data):
-                table.cell(row_index, col_index).text = value
+        for row_index, row_data in enumerate(data):
+            if row_index >= len(table.rows):
+                continue
+
+            row = table.rows[row_index]
+
+            # Clear the whole row first so old text does not remain.
+            for cell in row.cells:
+                set_cell_text(cell, "")
+
+            # Fill only existing Word cells.
+            max_cols = min(len(row.cells), len(row_data))
+
+            for col_index in range(max_cols):
+                set_cell_text(row.cells[col_index], row_data[col_index])
 
 
 
