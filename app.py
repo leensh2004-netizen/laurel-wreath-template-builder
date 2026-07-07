@@ -374,9 +374,8 @@ main_tab, partners_tab, policies_tab, excel_tab, tables_tab, generate_tab = st.t
     "1) Basic info",
     "2) Partners",
     "3) Accounting policies",
-    "4) Excel numbers",
-    "5) Optional table editor",
-    "6) Generate",
+    "4) Financial tables",
+    "5) Generate",
 ])
 
 
@@ -623,145 +622,108 @@ with policies_tab:
                 })
 
 # These will be populated in the Excel tab and used in Generate.
+# These will be populated in the Financial tables tab and used in Generate.
 financial_note_values = {}
 cell_values = {}
+table_updates = {}
 
 
-with excel_tab:
-    st.subheader("Upload trial balance Excel")
-    st.write("Upload the trial balance Excel file. The app extracts numbers by matching the Excel column 'المجموعة' to the Word note row. Current year uses 'النهائي' by default; previous year uses the comparative column immediately before 'المجموعة'. You can edit any value before generating.")
-    tb_file = st.file_uploader("Upload trial balance (.xls or .xlsx)", type=["xls", "xlsx"])
-    amount_source_label = st.radio(
-        "Which Excel amount column should be used for the current year?",
-        ["النهائي", "الرصيد"],
-        index=0,
-        horizontal=True,
-        help="For the company's sample trial balance, النهائي is the current-year amount. الرصيد is available only if your office specifically wants that column instead.",
-    )
-    amount_source = "final" if amount_source_label == "النهائي" else "balance"
-    round_to_whole_dinars = st.checkbox(
-        "Round extracted amounts to whole dinars",
-        value=True,
-        help="The Word notes usually show whole dinars. Turn this off if your office wants decimals from Excel.",
+with financial_tables_tab:
+    st.subheader("Financial tables / الجداول المالية")
+    st.info(
+        "Build tables manually and choose which existing Word table they should replace. "
+        "The table will stay in the same place in the Word template, but its rows and cells will be replaced."
     )
 
-    tb_df = None
-    if tb_file is not None:
-        try:
-            tb_df = read_trial_balance(io.BytesIO(tb_file.getvalue()), current_amount_source=amount_source)
-            st.success(f"Trial balance loaded: {len(tb_df):,} account rows detected.")
-            with st.expander("Preview extracted trial balance groups"):
-                preview = tb_df.groupby("group", dropna=True)[["current", "previous"]].sum().reset_index()
-                st.dataframe(preview, use_container_width=True, height=300)
-        except Exception as exc:
-            st.error(f"Could not read this Excel file: {exc}")
-            tb_df = None
+    table_infos = extract_table_data()
 
-    st.subheader("Extracted Excel numbers")
-    st.caption(
-        "After uploading a trial balance, the app will show the extracted numbers here. "
-        "Nothing is shown before upload because the old default rows were not related to this workflow."
-    )
+    if "financial_table_replacement_count" not in st.session_state:
+        st.session_state["financial_table_replacement_count"] = 0
 
-    if tb_df is None:
-        st.info("Upload a trial balance Excel file first. No number table will be shown until an Excel file is loaded.")
-    else:
-        use_financial_numbers = st.checkbox(
-            "Use these extracted numbers in the generated Word document",
-            value=True,
-        )
+    if st.button("➕ Add table replacement"):
+        st.session_state["financial_table_replacement_count"] += 1
+        st.rerun()
 
-        default_rows = build_note_rows(
-            tb_df,
-            round_to_whole_dinars=round_to_whole_dinars,
-        )
+    if st.session_state["financial_table_replacement_count"] == 0:
+        st.info("Click ➕ Add table replacement to start building a financial table.")
 
-        edited_note_rows = st.data_editor(
-            default_rows,
-            use_container_width=True,
-            hide_index=True,
-            height=520,
-            disabled=["section", "table_index", "row_index", "label", "matched_groups"],
-            column_config={
-                "include": st.column_config.CheckboxColumn(
-                    "Include",
-                    help="Uncheck if you do not want this row changed in the Word document.",
-                ),
-                "section": st.column_config.TextColumn("Section"),
-                "table_index": st.column_config.NumberColumn("Table", format="%d"),
-                "row_index": st.column_config.NumberColumn("Row", format="%d"),
-                "label": st.column_config.TextColumn("Line item"),
-                "current_year": st.column_config.TextColumn("Current year - editable"),
-                "previous_year": st.column_config.TextColumn("Previous year - editable"),
-                "matched_groups": st.column_config.TextColumn("Matched Excel المجموعة"),
-            },
-            key="financial_note_editor",
-        )
+    table_options = {
+        f"{t['index']}: {t['label']}": t["index"]
+        for t in table_infos
+    }
 
-        if use_financial_numbers:
-            financial_note_values = rows_to_financial_values(edited_note_rows)
+    used_table_indexes = set()
 
-    st.divider()
-    st.subheader("V10: Fixed asset movement table suggestions")
-    st.caption("This is for note (8) الممتلكات والمعدات. It uses ending balances from the trial balance to suggest 2024 opening, additions, depreciation, closing, and net book value. Review before applying.")
-    if tb_df is None:
-        st.info("Upload a trial balance first to see fixed-asset movement suggestions.")
-        ppe_rows = build_ppe_movement_cells(None, round_to_whole_dinars=round_to_whole_dinars)
-        use_ppe_movements = False
-    else:
-        ppe_rows = build_ppe_movement_cells(tb_df, round_to_whole_dinars=round_to_whole_dinars)
-        if ppe_rows.empty:
-            st.warning("No clear fixed-asset groups were detected. The app will not overwrite movement tables.")
-            use_ppe_movements = False
-        else:
-            use_ppe_movements = st.checkbox(
-                "Also update 2024 fixed-asset movement tables",
-                value=False,
-                help="Keep this off unless you reviewed the suggested movement cells. This updates note (8) tables only.",
+    for i in range(st.session_state["financial_table_replacement_count"]):
+        with st.expander(f"Table replacement {i + 1}", expanded=True):
+            selected_option = st.selectbox(
+                "Choose existing Word table to replace",
+                list(table_options.keys()),
+                key=f"financial_table_target_{i}",
             )
 
-    if not ppe_rows.empty:
-        edited_ppe_rows = st.data_editor(
-            ppe_rows,
-            use_container_width=True,
-            hide_index=True,
-            height=360,
-            disabled=["table_index", "row_index", "col_index", "label", "source"],
-            column_config={
-                "include": st.column_config.CheckboxColumn("Include"),
-                "table_index": st.column_config.NumberColumn("Table", format="%d"),
-                "row_index": st.column_config.NumberColumn("Row", format="%d"),
-                "col_index": st.column_config.NumberColumn("Column", format="%d"),
-                "label": st.column_config.TextColumn("Movement cell"),
-                "value": st.column_config.TextColumn("Value - editable"),
-                "source": st.column_config.TextColumn("Matched Excel source"),
-            },
-            key="ppe_movement_editor",
-        )
-        if use_ppe_movements and tb_df is not None:
-            cell_values = rows_to_cell_values(edited_ppe_rows)
+            target_table_index = table_options[selected_option]
+            used_table_indexes.add(target_table_index)
 
+            selected_table_info = table_infos[target_table_index]
 
-with tables_tab:
-    st.subheader("Optional full table editor")
-    st.warning("Use this only when you need to edit a table manually. If you only need trial-balance numbers, use the Excel numbers tab instead.")
-    table_updates = {}
-    table_infos = extract_table_data()
-    table_options = [f"{t['index']}: {t['label']}" for t in table_infos]
-    selected_tables = st.multiselect("Choose full Word tables to edit", table_options)
+            with st.expander("Preview original Word table", expanded=False):
+                original_data = selected_table_info.get("data", [])
+                if original_data:
+                    original_max_cols = max(len(row) for row in original_data)
+                    normalized_original = [
+                        row + [""] * (original_max_cols - len(row))
+                        for row in original_data
+                    ]
+                    st.dataframe(
+                        pd.DataFrame(normalized_original),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.write("No preview available for this table.")
 
-    for option in selected_tables:
-        idx = int(option.split(":", 1)[0])
-        info = table_infos[idx]
-        st.markdown(f"### Table {idx}: {info['label']}")
-        data = info["data"]
-        if not data:
-            continue
-        max_cols = max(len(r) for r in data)
-        normalized = [r + [""] * (max_cols - len(r)) for r in data]
-        df = pd.DataFrame(normalized, columns=[f"Column {i + 1}" for i in range(max_cols)])
-        edited = st.data_editor(df, use_container_width=True, key=f"table_editor_{idx}")
-        table_updates[idx] = edited.fillna("").astype(str).values.tolist()
+            st.markdown("**Build the replacement table:**")
+            st.caption("Write the table exactly as you want it to appear. Include the header row too.")
+
+            rows = st.number_input(
+                "Number of rows",
+                min_value=1,
+                max_value=50,
+                value=4,
+                step=1,
+                key=f"financial_table_rows_{i}",
+            )
+
+            cols = st.number_input(
+                "Number of columns",
+                min_value=1,
+                max_value=10,
+                value=3,
+                step=1,
+                key=f"financial_table_cols_{i}",
+            )
+
+            default_df = pd.DataFrame(
+                [["" for _ in range(int(cols))] for _ in range(int(rows))],
+                columns=[f"Column {c + 1}" for c in range(int(cols))],
+            )
+
+            edited_df = st.data_editor(
+                default_df,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                key=f"financial_table_editor_{i}",
+            )
+
+            replacement_data = edited_df.fillna("").astype(str).values.tolist()
+
+            if any(any(cell.strip() for cell in row) for row in replacement_data):
+                table_updates[target_table_index] = replacement_data
+                st.success(f"This will replace Word table {target_table_index}.")
+            else:
+                st.warning("This replacement table is empty, so it will not be applied.")
 
 
 
