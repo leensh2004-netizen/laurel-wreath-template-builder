@@ -597,21 +597,27 @@ def apply_table_data(doc, table_updates):
         while len(table.rows) < len(data):
             table.add_row()
 
+        # Fill replacement rows
         for row_index, row_data in enumerate(data):
             if row_index >= len(table.rows):
                 continue
 
             row = table.rows[row_index]
 
-            # Clear the whole row first so old text does not remain.
+            # Clear the row first
             for cell in row.cells:
                 set_cell_text(cell, "")
 
-            # Fill only existing Word cells.
+            # Fill only existing Word cells
             max_cols = min(len(row.cells), len(row_data))
-
             for col_index in range(max_cols):
                 set_cell_text(row.cells[col_index], row_data[col_index])
+
+        # Clear leftover old rows below the replacement data
+        for row_index in range(len(data), len(table.rows)):
+            row = table.rows[row_index]
+            for cell in row.cells:
+                set_cell_text(cell, "")
 
 
 
