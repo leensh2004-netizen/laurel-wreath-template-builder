@@ -768,6 +768,11 @@ with generate_tab:
         "audit_date": audit_date,
     }
 
+    partners_for_doc = [
+        p for p in partners
+        if p.get("name", "").strip()
+    ]
+
     st.write("Sections included:", len(included), "of", len(ALL_SECTIONS))
     st.write("Policy sections edited:", len(policy_text_edits))
     st.write("Financial note rows ready to update:", len(financial_note_values))
@@ -791,7 +796,7 @@ with generate_tab:
         try:
             output = generate_document(
                 form=form,
-                partners=partners,
+                partners=partners_for_doc,
                 included_section_keys=included,
                 custom_sections=custom_sections,
                 table_updates=table_updates,
