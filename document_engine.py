@@ -477,6 +477,9 @@ def fill_auditor_table(doc: DocxDocument, form: Dict[str, str]) -> None:
 
 
 def fill_partners_table(doc: DocxDocument, partners: List[Dict[str, str]]) -> None:
+
+    if not partners:
+        return
     # Table 1 in this template contains the partners table.
     target = None
     for table in doc.tables:
