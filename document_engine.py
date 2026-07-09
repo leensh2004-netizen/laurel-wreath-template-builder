@@ -455,6 +455,31 @@ def set_cell_text(cell: _Cell, text: str) -> None:
             run.font.highlight_color = None
 
 
+def format_partners_table(table: Table) -> None:
+    table.autofit = True
+
+    for row in table.rows:
+        for cell in row.cells:
+            tc_pr = cell._tc.get_or_add_tcPr()
+
+            no_wrap = tc_pr.find(qn("w:noWrap"))
+            if no_wrap is None:
+                tc_pr.append(OxmlElement("w:noWrap"))
+
+            for paragraph in cell.paragraphs:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                paragraph.paragraph_format.space_before = Pt(0)
+                paragraph.paragraph_format.space_after = Pt(0)
+                paragraph.paragraph_format.line_spacing = 1
+
+                for run in paragraph.runs:
+                    run.font.size = Pt(10)
+
+    # Partner-name column should stay right aligned
+    for row in table.rows:
+        if row.cells:
+            for paragraph in row.cells[0].paragraphs:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
 def fill_auditor_table(doc: DocxDocument, form: Dict[str, str]) -> None:
     """Fill the auditor block without changing the partners-table header."""
@@ -535,6 +560,7 @@ def fill_partners_table(doc: DocxDocument, partners: List[Dict[str, str]]) -> No
             set_cell_text(total_row.cells[6], f"{total_percentage:.2f}%")
     else:
         set_cell_text(total_row.cells[6], "")
+    format_partners_table(target)
 
 
 def extract_table_data(template_path: Path = TEMPLATE_PATH) -> List[Dict[str, object]]:
