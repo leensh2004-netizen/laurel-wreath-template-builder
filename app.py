@@ -315,7 +315,21 @@ def get_policy_keys_for_company_type(company_type_value: str) -> set:
 
     return selected_policy_keys
 
+def parse_number(value) -> float:
+    try:
+        cleaned = str(value or "").replace(",", "").replace("%", "").strip()
+        if not cleaned:
+            return 0.0
+        return float(cleaned)
+    except ValueError:
+        return 0.0
 
+
+def format_percent(value: float) -> str:
+    if value == int(value):
+        return f"{int(value)}%"
+    return f"{value:.2f}%"
+    
 def apply_policy_type_mapping(company_type_value: str) -> None:
     selected_policy_keys = get_policy_keys_for_company_type(company_type_value)
 
@@ -370,10 +384,10 @@ with st.sidebar:
     clear_replaced_format = st.checkbox("Remove red/highlight from filled fields", value=True)
 
 
-main_tab, partners_tab, policies_tab, financial_tables_tab, generate_tab = st.tabs([
-    "1) Basic info",
+policies_tab, partners_tab, main_tab, financial_tables_tab, generate_tab = st.tabs([
+    "1) Accounting policies",
     "2) Partners",
-    "3) Accounting policies",
+    "3) Basic info",
     "4) Financial tables",
     "5) Generate",
 ])
@@ -419,21 +433,92 @@ with main_tab:
 
 
 with partners_tab:
-    st.subheader("Partners table")
-    num_partners = st.number_input("Number of partners", min_value=0, max_value=30, value=2, step=1)
+    st.subheader("Partners / الشركاء")
+
+    st.info(
+        "Enter partner names, number of shares, and share value. "
+        "The ownership percentage will be calculated automatically."
+    )
+
+    total_company_shares = st.text_input(
+        "Total company shares / إجمالي عدد الحصص في الشركة",
+        key="total_company_shares",
+        help="Used to calculate each partner percentage. Example: 4713504",
+    )
+
+    total_company_shares_value = parse_number(total_company_shares)
+
+    num_partners = st.number_input(
+        "Number of partners / عدد الشركاء",
+        min_value=0,
+        max_value=30,
+        value=2,
+        step=1,
+    )
+
     partners = []
+    total_partner_shares = 0.0
+    total_partner_value = 0.0
+
     for i in range(int(num_partners)):
-        st.markdown(f"**Partner {i + 1}**")
+        st.markdown(f"**Partner {i + 1} / الشريك {i + 1}**")
+
         p1, p2, p3, p4 = st.columns(4)
+
         with p1:
-            name = st.text_input("Name", key=f"partner_name_{i}")
+            name = st.text_input("Name / اسم الشريك", key=f"partner_name_{i}")
+
         with p2:
-            shares = st.text_input("Number of shares", key=f"partner_shares_{i}")
+            shares = st.text_input("Number of shares / عدد الحصص", key=f"partner_shares_{i}")
+
         with p3:
-            value = st.text_input("Share value", key=f"partner_value_{i}")
+            value = st.text_input("Share value / قيمة الحصص", key=f"partner_value_{i}")
+
+        shares_value = parse_number(shares)
+        share_value_amount = parse_number(value)
+
+        if total_company_shares_value > 0:
+            percentage_value = (shares_value / total_company_shares_value) * 100
+        else:
+            percentage_value = 0.0
+
+        percentage_text = format_percent(percentage_value) if percentage_value else ""
+
         with p4:
-            percentage = st.text_input("Percentage", key=f"partner_pct_{i}")
-        partners.append({"name": name, "shares": shares, "value": value, "percentage": percentage})
+            st.text_input(
+                "Percentage / نسبة المساهمة",
+                value=percentage_text,
+                key=f"partner_pct_display_{i}",
+                disabled=True,
+            )
+
+        if name.strip():
+            partners.append({
+                "name": name.strip(),
+                "shares": shares,
+                "value": value,
+                "percentage": percentage_text,
+            })
+
+        total_partner_shares += shares_value
+        total_partner_value += share_value_amount
+
+    if total_company_shares_value > 0:
+        total_percentage = (total_partner_shares / total_company_shares_value) * 100
+    else:
+        total_percentage = 0.0
+
+    st.divider()
+
+    st.write("Total partner shares / مجموع حصص الشركاء:", f"{total_partner_shares:,.0f}")
+    st.write("Total share value / مجموع قيمة الحصص:", f"{total_partner_value:,.0f}")
+    st.write("Total ownership percentage / مجموع نسبة المساهمة:", format_percent(total_percentage) if total_percentage else "0%")
+
+    if total_company_shares_value <= 0 and int(num_partners) > 0:
+        st.warning("Enter total company shares so the app can calculate percentages.")
+
+    if total_percentage > 100:
+        st.error("Total ownership percentage is above 100%. Please check the number of shares.")
 
 # These will be populated in the Accounting policies tab and used in Generate.
 policy_text_edits = {}
@@ -778,6 +863,11 @@ with generate_tab:
     st.write("Financial note rows ready to update:", len(financial_note_values))
     st.write("Movement-table cells ready to update:", len(cell_values))
     st.write("Manual table replacements ready:", len(table_updates))
+    partner_percentage_error = False
+    try:
+        partner_percentage_error = total_percentage > 100
+    except NameError:
+        partner_percentage_error = False
     missing_required = []
     if not company_name:
         missing_required.append("Company name")
@@ -786,7 +876,11 @@ with generate_tab:
     if missing_required:
         st.warning("Recommended fields still empty: " + ", ".join(missing_required))
 
-    if st.button("Generate final Word document", type="primary"):
+    
+    if partner_percentage_error:
+        st.error("Fix the partners percentage before generating. Total percentage cannot exceed 100%.")
+
+    if st.button("Generate final Word document", type="primary", disabled=partner_percentage_error):
         loader_placeholder = st.empty()
         loader_placeholder.markdown(
             laurel_loader_html("Generating your Word document"),
