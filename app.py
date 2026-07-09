@@ -329,6 +329,45 @@ def format_percent(value: float) -> str:
     if value == int(value):
         return f"{int(value)}%"
     return f"{value:.2f}%"
+
+def get_partners_from_session():
+    total_company_shares_value = parse_number(
+        st.session_state.get("total_company_shares", "")
+    )
+
+    try:
+        count = int(st.session_state.get("num_partners", 0) or 0)
+    except ValueError:
+        count = 0
+
+    rows = []
+
+    for i in range(count):
+        name = str(st.session_state.get(f"partner_name_{i}", "") or "").strip()
+        shares = str(st.session_state.get(f"partner_shares_{i}", "") or "").strip()
+        value = str(st.session_state.get(f"partner_value_{i}", "") or "").strip()
+
+        if not name:
+            continue
+
+        shares_value = parse_number(shares)
+
+        if total_company_shares_value > 0:
+            percentage_value = (shares_value / total_company_shares_value) * 100
+            percentage_text = format_percent(percentage_value)
+        else:
+            percentage_value = 0.0
+            percentage_text = ""
+
+        rows.append({
+            "name": name,
+            "shares": shares,
+            "value": value,
+            "percentage": percentage_text,
+            "percentage_value": percentage_value,
+        })
+
+    return rows
     
 def apply_policy_type_mapping(company_type_value: str) -> None:
     selected_policy_keys = get_policy_keys_for_company_type(company_type_value)
@@ -396,6 +435,7 @@ policies_tab, partners_tab, main_tab, financial_tables_tab, generate_tab = st.ta
 with main_tab:
     st.subheader("Company information")
     c1, c2 = st.columns(2)
+
     with c1:
         company_name = st.text_input("Company name / اسم الشركة")
 
@@ -411,6 +451,7 @@ with main_tab:
         financial_year = st.text_input("Financial year phrase / السنة المالية")
         registration_number = st.text_input("Registration number / رقم التسجيل")
         registration_date = st.text_input("Registration date / تاريخ التسجيل")
+
     with c2:
         capital = st.text_input("Capital / رأس المال")
         currency = st.text_input("Currency / العملة", value="دينار أردني")
@@ -420,12 +461,54 @@ with main_tab:
         current_year = st.text_input("Current year shown in tables", value="2024")
         previous_year = st.text_input("Comparative year shown in tables", value="2023")
 
+    st.divider()
+    st.subheader("Important partners / أهم الشركاء")
+
+    important_partner_threshold = st.number_input(
+        "Minimum ownership percentage / الحد الأدنى لنسبة المساهمة",
+        min_value=0.0,
+        max_value=100.0,
+        value=5.0,
+        step=0.5,
+        help="Partners above this percentage can be selected for the important partners table.",
+    )
+
+    available_partners = get_partners_from_session()
+    partner_options = [p["name"] for p in available_partners]
+
+    recommended_partner_names = [
+        p["name"]
+        for p in available_partners
+        if p.get("percentage_value", 0) >= important_partner_threshold
+    ]
+
+    selected_important_partner_names = st.multiselect(
+        "Partners to show in the Word table / الشركاء الذين سيظهرون في الجدول",
+        options=partner_options,
+        default=recommended_partner_names,
+        help="The app recommends partners above the threshold, but you can change the selection.",
+    )
+
+    if not partner_options:
+        st.info("Fill the Partners tab first, then come back here to choose important partners.")
+    elif selected_important_partner_names:
+        st.success(
+            "Selected important partners: "
+            + ", ".join(selected_important_partner_names)
+        )
+    else:
+        st.warning("No important partners selected. The Word partners table will not be replaced.")
+
+    st.divider()
     st.subheader("Auditor information")
+
     c3, c4 = st.columns(2)
+
     with c3:
         audit_logo_text = st.text_input("Audit logo text / شعار مكتب التدقيق", value="شعار مكتب التدقيق")
         audit_office = st.text_input("Audit office name / اسم مكتب التدقيق")
         audit_partner = st.text_input("Audit partner name / اسم الشريك")
+
     with c4:
         audit_license = st.text_input("License number / اجازة رقم")
         audit_date = st.text_input("Audit report date / التاريخ")
@@ -454,7 +537,8 @@ with partners_tab:
         max_value=30,
         value=2,
         step=1,
-    )
+        key="num_partners",
+ )
 
     partners = []
     total_partner_shares = 0.0
@@ -851,12 +935,23 @@ with generate_tab:
         "audit_partner": audit_partner,
         "audit_license": audit_license,
         "audit_date": audit_date,
+        "important_partner_threshold": important_partner_threshold,
     }
 
-    partners_for_doc = [
+    selected_important_names = set(selected_important_partner_names)
+
+    all_partners_for_doc = [
         p for p in partners
         if p.get("name", "").strip()
     ]
+
+    if selected_important_names:
+        partners_for_doc = [
+            p for p in all_partners_for_doc
+            if p.get("name", "").strip() in selected_important_names
+        ]
+    else:
+        partners_for_doc = []
 
     st.write("Sections included:", len(included), "of", len(ALL_SECTIONS))
     st.write("Policy sections edited:", len(policy_text_edits))
