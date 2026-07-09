@@ -939,6 +939,16 @@ def append_custom_sections(doc: DocxDocument, sections: List[Dict[str, str]]) ->
 
 def build_replacements(form: Dict[str, str]) -> Dict[str, str]:
     city_country = f"{form.get('city','')} - {form.get('country','')}".strip(" -")
+    threshold_raw = form.get("important_partner_threshold", "5")
+
+    try:
+        threshold_num = float(threshold_raw)
+        if threshold_num == int(threshold_num):
+            threshold_text = str(int(threshold_num))
+        else:
+            threshold_text = str(threshold_num).rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        threshold_text = str(threshold_raw or "5").replace("%", "").strip() or "5"
     replacements = {
         'اسم الشركة "من اسم الملف الاساسي"': form.get("company_name", ""),
         'اسم الشركة من اسم الملف الاساسي': form.get("company_name", ""),
@@ -962,6 +972,10 @@ def build_replacements(form: Dict[str, str]) -> Dict[str, str]:
         'العملة من ملف الشركة': form.get("currency", ""),
         'صندوق بريد  ... من ملف الشركة.....اسم المدينة – الرمز البريدي من ملف الشركة - الدولة': f"صندوق بريد {form.get('po_box','')} {form.get('city','')} – {form.get('postal_code','')} - {form.get('country','')}",
         'بتاريخ ..........': f"بتاريخ {form.get('approval_date','')}",
+        'ان اهم الشركاء في الشركة والذين تزيد نسبة مساهمتهم عن 5% هم كما يلي :': f'ان اهم الشركاء في الشركة والذين تزيد نسبة مساهمتهم عن {threshold_text}% هم كما يلي :',
+        'ان اهم الشركاء في الشركة والذين تزيد نسبة مساهمتهم عن 5 هم كما يلي % :': f'ان اهم الشركاء في الشركة والذين تزيد نسبة مساهمتهم عن {threshold_text}% هم كما يلي :',
+        'والذين تزيد نسبة مساهمتهم عن 5% هم كما يلي': f'والذين تزيد نسبة مساهمتهم عن {threshold_text}% هم كما يلي',
+        'والذين تزيد نسبة مساهمتهم عن 5 هم كما يلي %': f'والذين تزيد نسبة مساهمتهم عن {threshold_text}% هم كما يلي',
     }
     # Do NOT globally replace "اسم الشريك" because it is also the partners table header.
     return {k: v for k, v in replacements.items() if v is not None}
