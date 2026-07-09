@@ -503,6 +503,7 @@ def fill_partners_table(doc: DocxDocument, partners: List[Dict[str, str]]) -> No
 
     total_shares = 0.0
     total_value = 0.0
+    total_percentage = 0.0
     for i, partner in enumerate(partners):
         row = target.rows[start_row + i]
         set_cell_text(row.cells[0], partner.get("name", ""))
@@ -518,11 +519,22 @@ def fill_partners_table(doc: DocxDocument, partners: List[Dict[str, str]]) -> No
         except ValueError:
             pass
 
+        try:
+            total_percentage += float(str(partner.get("percentage", "0")).replace("%", "").replace(",", ""))
+        except ValueError:
+            pass
+
     total_row = target.rows[start_row + max(len(partners), 1)]
     set_cell_text(total_row.cells[0], "المجموع")
     set_cell_text(total_row.cells[2], f"{total_shares:,.0f}" if total_shares else "")
     set_cell_text(total_row.cells[4], f"{total_value:,.0f}" if total_value else "")
-    set_cell_text(total_row.cells[6], "100%" if partners else "")
+    if total_percentage:
+        if total_percentage == int(total_percentage):
+            set_cell_text(total_row.cells[6], f"{int(total_percentage)}%")
+        else:
+            set_cell_text(total_row.cells[6], f"{total_percentage:.2f}%")
+    else:
+        set_cell_text(total_row.cells[6], "")
 
 
 def extract_table_data(template_path: Path = TEMPLATE_PATH) -> List[Dict[str, object]]:
