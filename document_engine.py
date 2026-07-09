@@ -454,32 +454,123 @@ def set_cell_text(cell: _Cell, text: str) -> None:
             run.font.color.rgb = RGBColor(0, 0, 0)
             run.font.highlight_color = None
 
+def make_ltr(text: str) -> str:
+    text = "" if text is None else str(text)
+    if not text.strip():
+        return ""
+    return f"\u200e{text}\u200e"
 
-def format_partners_table(table: Table) -> None:
-    table.autofit = True
 
-    for row in table.rows:
-        for cell in row.cells:
-            tc_pr = cell._tc.get_or_add_tcPr()
+def to_float(value) -> float:
+    try:
+        cleaned = str(value or "").replace(",", "").replace("%", "").strip()
+        if not cleaned:
+            return 0.0
+        return float(cleaned)
+    except ValueError:
+        return 0.0
 
-            no_wrap = tc_pr.find(qn("w:noWrap"))
-            if no_wrap is None:
-                tc_pr.append(OxmlElement("w:noWrap"))
 
-            for paragraph in cell.paragraphs:
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                paragraph.paragraph_format.space_before = Pt(0)
-                paragraph.paragraph_format.space_after = Pt(0)
-                paragraph.paragraph_format.line_spacing = 1
+def format_percent_for_doc(value: float) -> str:
+    if not value:
+        return ""
+    if value == int(value):
+        return f"{int(value)}%"
+    return f"{value:.2f}%"
 
-                for run in paragraph.runs:
-                    run.font.size = Pt(10)
 
-    # Partner-name column should stay right aligned
-    for row in table.rows:
-        if row.cells:
-            for paragraph in row.cells[0].paragraphs:
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+def set_table_rtl(table: Table) -> None:
+    tbl_pr = table._tbl.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        table._tbl.insert(0, tbl_pr)
+
+    if tbl_pr.find(qn("w:bidiVisual")) is None:
+        tbl_pr.append(OxmlElement("w:bidiVisual"))
+
+
+def set_cell_width(cell: _Cell, width_dxa: int) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+
+    tc_w = tc_pr.find(qn("w:tcW"))
+    if tc_w is None:
+        tc_w = OxmlElement("w:tcW")
+        tc_pr.append(tc_w)
+
+    tc_w.set(qn("w:w"), str(width_dxa))
+    tc_w.set(qn("w:type"), "dxa")
+
+
+def set_cell_no_wrap(cell: _Cell) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+
+    if tc_pr.find(qn("w:noWrap")) is None:
+        tc_pr.append(OxmlElement("w:noWrap"))
+
+
+def set_cell_bottom_border(cell: _Cell) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+
+    tc_borders = tc_pr.find(qn("w:tcBorders"))
+    if tc_borders is None:
+        tc_borders = OxmlElement("w:tcBorders")
+        tc_pr.append(tc_borders)
+
+    bottom = tc_borders.find(qn("w:bottom"))
+    if bottom is None:
+        bottom = OxmlElement("w:bottom")
+        tc_borders.append(bottom)
+
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "8")
+    bottom.set(qn("w:space"), "0")
+    bottom.set(qn("w:color"), "000000")
+
+
+def set_cell_top_border(cell: _Cell) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+
+    tc_borders = tc_pr.find(qn("w:tcBorders"))
+    if tc_borders is None:
+        tc_borders = OxmlElement("w:tcBorders")
+        tc_pr.append(tc_borders)
+
+    top = tc_borders.find(qn("w:top"))
+    if top is None:
+        top = OxmlElement("w:top")
+        tc_borders.append(top)
+
+    top.set(qn("w:val"), "single")
+    top.set(qn("w:sz"), "8")
+    top.set(qn("w:space"), "0")
+    top.set(qn("w:color"), "000000")
+
+
+def write_clean_cell(
+    cell: _Cell,
+    text: str,
+    width_dxa: int,
+    bold: bool = False,
+    align=WD_ALIGN_PARAGRAPH.CENTER,
+    no_wrap: bool = True,
+) -> None:
+    set_cell_text(cell, text)
+    set_cell_width(cell, width_dxa)
+
+    if no_wrap:
+        set_cell_no_wrap(cell)
+
+    for paragraph in cell.paragraphs:
+        paragraph.alignment = align
+        paragraph.paragraph_format.space_before = Pt(0)
+        paragraph.paragraph_format.space_after = Pt(0)
+        paragraph.paragraph_format.line_spacing = 1
+
+        for run in paragraph.runs:
+            run.bold = bold
+            run.font.size = Pt(10)
+            run.font.color.rgb = RGBColor(0, 0, 0)
+
 
 def fill_auditor_table(doc: DocxDocument, form: Dict[str, str]) -> None:
     """Fill the auditor block without changing the partners-table header."""
@@ -502,65 +593,93 @@ def fill_auditor_table(doc: DocxDocument, form: Dict[str, str]) -> None:
 
 
 def fill_partners_table(doc: DocxDocument, partners: List[Dict[str, str]]) -> None:
-
     if not partners:
         return
-    # Table 1 in this template contains the partners table.
+
     target = None
+
     for table in doc.tables:
         txt = _clean_text(" ".join(cell.text for row in table.rows for cell in row.cells))
+
         if "اسم الشريك" in txt and "عدد الحصص" in txt and "نسبة المساهمة" in txt:
             target = table
             break
+
     if target is None:
         return
-
-    # Keep first two header rows and one total row. Fill from row index 2.
-    start_row = 2
-    total_row_index = len(target.rows) - 1
-    needed_rows = start_row + max(len(partners), 1) + 1
-    while len(target.rows) < needed_rows:
-        target.add_row()
-    # If too many old rows, clear them rather than deleting to preserve layout.
-    for ri in range(start_row, len(target.rows)):
-        for cell in target.rows[ri].cells:
-            set_cell_text(cell, "")
 
     total_shares = 0.0
     total_value = 0.0
     total_percentage = 0.0
-    for i, partner in enumerate(partners):
-        row = target.rows[start_row + i]
-        set_cell_text(row.cells[0], partner.get("name", ""))
-        set_cell_text(row.cells[2], partner.get("shares", ""))
-        set_cell_text(row.cells[4], partner.get("value", ""))
-        set_cell_text(row.cells[6], partner.get("percentage", ""))
-        try:
-            total_shares += float(str(partner.get("shares", "0")).replace(",", ""))
-        except ValueError:
-            pass
-        try:
-            total_value += float(str(partner.get("value", "0")).replace(",", ""))
-        except ValueError:
-            pass
 
-        try:
-            total_percentage += float(str(partner.get("percentage", "0")).replace("%", "").replace(",", ""))
-        except ValueError:
-            pass
+    for partner in partners:
+        total_shares += to_float(partner.get("shares", ""))
+        total_value += to_float(partner.get("value", ""))
+        total_percentage += to_float(partner.get("percentage", ""))
 
-    total_row = target.rows[start_row + max(len(partners), 1)]
-    set_cell_text(total_row.cells[0], "المجموع")
-    set_cell_text(total_row.cells[2], f"{total_shares:,.0f}" if total_shares else "")
-    set_cell_text(total_row.cells[4], f"{total_value:,.0f}" if total_value else "")
-    if total_percentage:
-        if total_percentage == int(total_percentage):
-            set_cell_text(total_row.cells[6], f"{int(total_percentage)}%")
-        else:
-            set_cell_text(total_row.cells[6], f"{total_percentage:.2f}%")
-    else:
-        set_cell_text(total_row.cells[6], "")
-    format_partners_table(target)
+    # Create a fresh clean table at the end first
+    new_table = doc.add_table(rows=len(partners) + 2, cols=4)
+    new_table.autofit = False
+    set_table_rtl(new_table)
+
+    # Widths are in twentieths of a point.
+    # Because the table is RTL:
+    # cell 0 appears on the right, cell 3 appears on the left.
+    widths = {
+        "name": 3600,
+        "shares": 1800,
+        "value": 2000,
+        "percentage": 1800,
+    }
+
+    # Header row
+    header = new_table.rows[0]
+    write_clean_cell(header.cells[0], "اسم الشريك", widths["name"], bold=True, align=WD_ALIGN_PARAGRAPH.RIGHT)
+    write_clean_cell(header.cells[1], "عدد الحصص", widths["shares"], bold=True)
+    write_clean_cell(header.cells[2], "قيمة الحصص\nدينار أردني", widths["value"], bold=True)
+    write_clean_cell(header.cells[3], "نسبة المساهمة", widths["percentage"], bold=True)
+
+    for cell in header.cells:
+        set_cell_bottom_border(cell)
+
+    # Partner rows
+    for i, partner in enumerate(partners, start=1):
+        row = new_table.rows[i]
+
+        write_clean_cell(
+            row.cells[0],
+            partner.get("name", ""),
+            widths["name"],
+            align=WD_ALIGN_PARAGRAPH.RIGHT,
+            no_wrap=False,
+        )
+
+        write_clean_cell(row.cells[1], partner.get("shares", ""), widths["shares"])
+        write_clean_cell(row.cells[2], partner.get("value", ""), widths["value"])
+        write_clean_cell(row.cells[3], make_ltr(partner.get("percentage", "")), widths["percentage"])
+
+    # Total row
+    total_row = new_table.rows[len(partners) + 1]
+
+    write_clean_cell(total_row.cells[0], "المجموع", widths["name"], bold=True, align=WD_ALIGN_PARAGRAPH.RIGHT)
+    write_clean_cell(total_row.cells[1], f"{total_shares:,.0f}" if total_shares else "", widths["shares"], bold=True)
+    write_clean_cell(total_row.cells[2], f"{total_value:,.0f}" if total_value else "", widths["value"], bold=True)
+    write_clean_cell(total_row.cells[3], make_ltr(format_percent_for_doc(total_percentage)), widths["percentage"], bold=True)
+
+    for cell in total_row.cells:
+        set_cell_top_border(cell)
+        set_cell_bottom_border(cell)
+
+    # Move the new clean table to the old table position, then remove the old broken table
+    old_tbl = target._tbl
+    parent = old_tbl.getparent()
+    old_index = parent.index(old_tbl)
+
+    new_tbl = new_table._tbl
+    new_tbl.getparent().remove(new_tbl)
+
+    parent.insert(old_index, new_tbl)
+    parent.remove(old_tbl)
 
 
 def extract_table_data(template_path: Path = TEMPLATE_PATH) -> List[Dict[str, object]]:
