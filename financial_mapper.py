@@ -142,55 +142,73 @@ def read_mapping_excel(mapping_file) -> List[MappingItem]:
 
 def read_trial_balance(trial_balance_file) -> pd.DataFrame:
     """
-    Reads trial balance and tries to detect:
-    - account name column
-    - current year amount column
-    - previous year amount column
+    Reads the Laurel trial balance format.
+
+    Expected columns:
+    - المجموعة = account group used for matching
+    - النهائي = current year amount
+    - column before المجموعة = previous year amount
+    - إسم الحساب = detailed account name
+    - رقم الحساب = account number, ignored as amount
     """
     raw = pd.read_excel(trial_balance_file, header=None)
 
-    # Drop fully empty rows/columns
-    raw = raw.dropna(how="all").dropna(axis=1, how="all")
-    raw = raw.reset_index(drop=True)
+    header_row_index = None
+    group_col = None
+    current_col = None
+    detail_col = None
+    account_no_col = None
+
+    for r in range(min(20, len(raw))):
+        row_values = [clean_text(v) for v in raw.iloc[r].values]
+
+        for c, value in enumerate(row_values):
+            if "المجموعه" in value or "المجموعة" in str(raw.iloc[r, c]):
+                header_row_index = r
+                group_col = c
+
+            if "النهائي" in value:
+                current_col = c
+
+            if "اسم الحساب" in value or "إسم الحساب" in str(raw.iloc[r, c]):
+                detail_col = c
+
+            if "رقم الحساب" in value:
+                account_no_col = c
+
+    if header_row_index is None or group_col is None or current_col is None:
+        return pd.DataFrame(
+            columns=[
+                "account_name",
+                "account_name_clean",
+                "detail_account_name",
+                "current_amount",
+                "previous_amount",
+            ]
+        )
+
+    previous_col = group_col - 1
 
     rows = []
 
-    for _, row in raw.iterrows():
-        values = list(row.values)
+    for r in range(header_row_index + 1, len(raw)):
+        account_group = str(raw.iloc[r, group_col] or "").strip()
 
-        text_values = [
-            str(v).strip()
-            for v in values
-            if str(v).strip() and str(v).strip().lower() != "nan"
-        ]
-
-        if not text_values:
+        if not account_group or account_group.lower() == "nan":
             continue
 
-        # Account name = longest text value in row
-        possible_names = [
-            v for v in text_values
-            if not re.fullmatch(r"[-+]?\(?[\d,]+(\.\d+)?\)?", v)
-        ]
+        detail_name = ""
+        if detail_col is not None:
+            detail_name = str(raw.iloc[r, detail_col] or "").strip()
 
-        if not possible_names:
-            continue
-
-        account_name = max(possible_names, key=len)
-
-        numeric_values = [
-            clean_number(v)
-            for v in values
-            if clean_number(v) != 0
-        ]
-
-        current_amount = numeric_values[0] if len(numeric_values) >= 1 else 0.0
-        previous_amount = numeric_values[1] if len(numeric_values) >= 2 else 0.0
+        current_amount = clean_number(raw.iloc[r, current_col])
+        previous_amount = clean_number(raw.iloc[r, previous_col])
 
         rows.append(
             {
-                "account_name": account_name,
-                "account_name_clean": clean_text(account_name),
+                "account_name": account_group,
+                "account_name_clean": clean_text(account_group),
+                "detail_account_name": detail_name,
                 "current_amount": current_amount,
                 "previous_amount": previous_amount,
             }
@@ -199,16 +217,16 @@ def read_trial_balance(trial_balance_file) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def find_best_match(account_name: str, trial_balance_df: pd.DataFrame) -> Optional[pd.Series]:
+def find_best_match(account_name: str, trial_balance_df: pd.DataFrame) -> pd.DataFrame:
     target = clean_text(account_name)
 
-    if not target:
-        return None
+    if not target or trial_balance_df.empty:
+        return pd.DataFrame()
 
-    # 1. Exact normalized match
+    # 1. Exact match on trial balance group
     exact = trial_balance_df[trial_balance_df["account_name_clean"] == target]
     if not exact.empty:
-        return exact.iloc[0]
+        return exact
 
     # 2. Contains match
     contains = trial_balance_df[
@@ -218,29 +236,27 @@ def find_best_match(account_name: str, trial_balance_df: pd.DataFrame) -> Option
     ]
 
     if not contains.empty:
-        return contains.iloc[0]
+        best_group = contains.iloc[0]["account_name_clean"]
+        return trial_balance_df[trial_balance_df["account_name_clean"] == best_group]
 
-    # 3. Word overlap match
+    # 3. Word overlap
     target_words = set(target.split())
 
-    best_row = None
+    best_group = None
     best_score = 0
 
-    for _, row in trial_balance_df.iterrows():
-        words = set(str(row["account_name_clean"]).split())
-        if not words:
-            continue
-
-        score = len(target_words & words)
+    for group_name in trial_balance_df["account_name_clean"].dropna().unique():
+        group_words = set(str(group_name).split())
+        score = len(target_words & group_words)
 
         if score > best_score:
             best_score = score
-            best_row = row
+            best_group = group_name
 
-    if best_score >= 2:
-        return best_row
+    if best_score >= 2 and best_group:
+        return trial_balance_df[trial_balance_df["account_name_clean"] == best_group]
 
-    return None
+    return pd.DataFrame()
 
 
 def build_mapping_preview(mapping_file, trial_balance_file) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -250,9 +266,9 @@ def build_mapping_preview(mapping_file, trial_balance_file) -> Tuple[pd.DataFram
     matched_rows: List[Dict[str, object]] = []
 
     for item in mapping_items:
-        match = find_best_match(item.account_name, trial_balance_df)
+        match_rows = find_best_match(item.account_name, trial_balance_df)
 
-        if match is None:
+        if match_rows.empty:
             matched_rows.append(
                 {
                     "Group": item.group_name,
@@ -265,13 +281,17 @@ def build_mapping_preview(mapping_file, trial_balance_file) -> Tuple[pd.DataFram
                 }
             )
         else:
+            matched_account_names = ", ".join(
+                sorted(match_rows["account_name"].dropna().astype(str).unique())
+            )
+
             matched_rows.append(
                 {
                     "Group": item.group_name,
                     "Mapping account": item.account_name,
-                    "Matched trial balance account": match["account_name"],
-                    "Current amount": match["current_amount"],
-                    "Previous amount": match["previous_amount"],
+                    "Matched trial balance account": matched_account_names,
+                    "Current amount": match_rows["current_amount"].sum(),
+                    "Previous amount": match_rows["previous_amount"].sum(),
                     "Status": "Matched",
                     "Mapping cell": item.cell,
                 }
