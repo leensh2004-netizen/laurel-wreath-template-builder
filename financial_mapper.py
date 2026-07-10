@@ -44,7 +44,36 @@ def clean_text(value) -> str:
 
     return text.strip()
 
+def arabic_words(value) -> set:
+    text = clean_text(value)
 
+    stop_words = {
+        "في", "من", "الى", "إلى", "علي", "على", "لدي", "لدى",
+        "و", "او", "أو", "عن", "مع", "كل", "غير",
+    }
+
+    words = []
+
+    for word in text.split():
+        word = word.strip()
+
+        if word.startswith("ال") and len(word) > 4:
+            word = word[2:]
+
+        if word.endswith("ات") and len(word) > 4:
+            word = word[:-2]
+
+        if word.endswith("ون") and len(word) > 4:
+            word = word[:-2]
+
+        if word.endswith("ين") and len(word) > 4:
+            word = word[:-2]
+
+        if len(word) > 2 and word not in stop_words:
+            words.append(word)
+
+    return set(words)
+    
 def clean_number(value) -> float:
     if value is None:
         return 0.0
@@ -262,8 +291,8 @@ def find_best_match(
         if len(target) >= 6 and (target in detail or detail in target):
             return row
 
-    # 4. Strong word overlap on detailed account name
-    target_words = {w for w in target.split() if len(w) > 2}
+    # 4. Smarter Arabic word overlap on detailed account name
+    target_words = arabic_words(target)
 
     best_row = None
     best_score = 0.0
@@ -272,10 +301,7 @@ def find_best_match(
         if idx in used_indexes:
             continue
 
-        detail_words = {
-            w for w in str(row.get("detail_account_name_clean", "")).split()
-            if len(w) > 2
-        }
+        detail_words = arabic_words(row.get("detail_account_name_clean", ""))
 
         if not target_words or not detail_words:
             continue
@@ -287,7 +313,7 @@ def find_best_match(
             best_score = score
             best_row = row
 
-    if best_score >= 0.70:
+    if best_score >= 0.50:
         return best_row
 
     return None
