@@ -4,6 +4,7 @@ import io
 
 import pandas as pd
 import streamlit as st
+from financial_mapper import build_mapping_preview
 
 from document_engine import (
     POLICY_SECTIONS,
@@ -798,120 +799,38 @@ table_updates = {}
 
 
 with financial_tables_tab:
-    st.subheader("Financial tables / الجداول المالية")
-    st.info(
-        "Build tables manually and choose which existing Word table they should replace. "
-        "The table will stay in the same place in the Word template, but its rows and cells will be replaced."
+    st.subheader("Automatic Excel mapping test / اختبار ربط الإكسل")
+
+    mapping_file = st.file_uploader(
+        "Upload mapping Excel / ملف التحويل",
+        type=["xlsx"],
+        key="mapping_excel_file",
     )
 
-    table_infos = extract_table_data()
+    trial_balance_file = st.file_uploader(
+        "Upload trial balance / ميزان المراجعة",
+        type=["xls", "xlsx"],
+        key="trial_balance_file",
+    )
 
-    if "financial_table_replacement_count" not in st.session_state:
-        st.session_state["financial_table_replacement_count"] = 0
-
-    if st.button("➕ Add table replacement"):
-        st.session_state["financial_table_replacement_count"] += 1
-        st.rerun()
-
-    if st.session_state["financial_table_replacement_count"] == 0:
-        st.info("Click ➕ Add table replacement to start building a financial table.")
-
-    table_options = {
-        f"{t['index']}: {t['label']}": t["index"]
-        for t in table_infos
-    }
-
-    used_table_indexes = set()
-
-    for i in range(st.session_state["financial_table_replacement_count"]):
-        with st.expander(f"Table replacement {i + 1}", expanded=True):
-            selected_option = st.selectbox(
-                "Choose existing Word table to replace",
-                list(table_options.keys()),
-                key=f"financial_table_target_{i}",
+    if mapping_file and trial_balance_file:
+        if st.button("Test Excel mapping"):
+            preview_df, summary_df = build_mapping_preview(
+                mapping_file=mapping_file,
+                trial_balance_file=trial_balance_file,
             )
 
-            target_table_index = table_options[selected_option]
-            used_table_indexes.add(target_table_index)
+            st.success("Mapping test completed.")
 
-            selected_table_info = table_infos[target_table_index]
-            original_data = selected_table_info.get("data", [])
+            st.markdown("### Summary by group")
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-            original_rows = len(original_data) if original_data else 1
-            original_cols = max((len(row) for row in original_data), default=1)
+            st.markdown("### Detailed matching preview")
+            st.dataframe(preview_df, use_container_width=True, hide_index=True)
 
-            normalized_original = [
-                row + [""] * (original_cols - len(row))
-                for row in original_data
-            ]
+    st.divider()
 
-            show_preview = st.checkbox(
-                "Show original Word table preview",
-                value=False,
-                key=f"show_original_table_preview_{i}",
-            )
-
-            if show_preview:
-                if normalized_original:
-                    st.dataframe(
-                        pd.DataFrame(normalized_original),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                else:
-                    st.write("No preview available for this table.")
-
-            st.markdown("**Edit the replacement table:**")
-            st.caption(
-                "The original Word table is loaded below. Edit the cells directly. "
-                "Columns are locked to protect the Word layout."
-            )
-
-            rows = st.number_input(
-                "Number of rows",
-                min_value=1,
-                max_value=50,
-                value=original_rows,
-                step=1,
-                key=f"financial_table_rows_{i}_{target_table_index}",
-            )
-
-            cols = st.number_input(
-                "Number of columns",
-                min_value=1,
-                max_value=10,
-                value=original_cols,
-                step=1,
-                key=f"financial_table_cols_{i}_{target_table_index}",
-                disabled=True,
-                help="Columns are locked to protect the Word layout. Add/remove rows only.",
-            )
-
-            default_df = pd.DataFrame(
-                [["" for _ in range(original_cols)] for _ in range(int(rows))],
-                columns=[f"Cell {c + 1}" for c in range(original_cols)],
-            )
-
-            for r in range(min(int(rows), len(normalized_original))):
-                for c in range(original_cols):
-                    default_df.iat[r, c] = normalized_original[r][c]
-
-            edited_df = st.data_editor(
-                default_df,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                key=f"financial_table_editor_{i}_{target_table_index}_{int(rows)}",
-            )
-
-            replacement_data = edited_df.fillna("").astype(str).values.tolist()
-
-            if any(any(cell.strip() for cell in row) for row in replacement_data):
-                table_updates[target_table_index] = replacement_data
-                st.success(f"This will replace Word table {target_table_index}.")
-            else:
-                st.warning("This replacement table is empty, so it will not be applied.")
-
+    st.subheader("Financial tables / الجداول المالية")
 
 with generate_tab:
     st.subheader("Generate final Word document")
