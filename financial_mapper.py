@@ -217,46 +217,80 @@ def read_trial_balance(trial_balance_file) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def find_best_match(account_name: str, trial_balance_df: pd.DataFrame) -> pd.DataFrame:
+def find_best_match(
+    account_name: str,
+    trial_balance_df: pd.DataFrame,
+    used_indexes: Optional[set] = None,
+) -> Optional[pd.Series]:
+    used_indexes = used_indexes or set()
     target = clean_text(account_name)
 
     if not target or trial_balance_df.empty:
-        return pd.DataFrame()
+        return None
 
-    # 1. Exact match on trial balance group
-    exact = trial_balance_df[trial_balance_df["account_name_clean"] == target]
-    if not exact.empty:
-        return exact
+    # Add clean detail column if missing
+    if "detail_account_name_clean" not in trial_balance_df.columns:
+        trial_balance_df["detail_account_name_clean"] = trial_balance_df[
+            "detail_account_name"
+        ].apply(clean_text)
 
-    # 2. Contains match
-    contains = trial_balance_df[
-        trial_balance_df["account_name_clean"].apply(
-            lambda x: target in x or x in target
-        )
+    # 1. Exact match with detailed account name
+    exact_detail = trial_balance_df[
+        (~trial_balance_df.index.isin(used_indexes))
+        & (trial_balance_df["detail_account_name_clean"] == target)
     ]
 
-    if not contains.empty:
-        best_group = contains.iloc[0]["account_name_clean"]
-        return trial_balance_df[trial_balance_df["account_name_clean"] == best_group]
+    if not exact_detail.empty:
+        return exact_detail.iloc[0]
 
-    # 3. Word overlap
-    target_words = set(target.split())
+    # 2. Exact match with group/account name
+    exact_group = trial_balance_df[
+        (~trial_balance_df.index.isin(used_indexes))
+        & (trial_balance_df["account_name_clean"] == target)
+    ]
 
-    best_group = None
-    best_score = 0
+    if not exact_group.empty:
+        return exact_group.iloc[0]
 
-    for group_name in trial_balance_df["account_name_clean"].dropna().unique():
-        group_words = set(str(group_name).split())
-        score = len(target_words & group_words)
+    # 3. Safe contains match on detailed account name only
+    for idx, row in trial_balance_df.iterrows():
+        if idx in used_indexes:
+            continue
+
+        detail = str(row.get("detail_account_name_clean", ""))
+
+        if len(target) >= 6 and (target in detail or detail in target):
+            return row
+
+    # 4. Strong word overlap on detailed account name
+    target_words = {w for w in target.split() if len(w) > 2}
+
+    best_row = None
+    best_score = 0.0
+
+    for idx, row in trial_balance_df.iterrows():
+        if idx in used_indexes:
+            continue
+
+        detail_words = {
+            w for w in str(row.get("detail_account_name_clean", "")).split()
+            if len(w) > 2
+        }
+
+        if not target_words or not detail_words:
+            continue
+
+        overlap = len(target_words & detail_words)
+        score = overlap / max(len(target_words), len(detail_words))
 
         if score > best_score:
             best_score = score
-            best_group = group_name
+            best_row = row
 
-    if best_score >= 2 and best_group:
-        return trial_balance_df[trial_balance_df["account_name_clean"] == best_group]
+    if best_score >= 0.70:
+        return best_row
 
-    return pd.DataFrame()
+    return None
 
 
 def build_mapping_preview(mapping_file, trial_balance_file) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -264,11 +298,16 @@ def build_mapping_preview(mapping_file, trial_balance_file) -> Tuple[pd.DataFram
     trial_balance_df = read_trial_balance(trial_balance_file)
 
     matched_rows: List[Dict[str, object]] = []
+    used_trial_indexes = set()
 
     for item in mapping_items:
-        match_rows = find_best_match(item.account_name, trial_balance_df)
+        match = find_best_match(
+            item.account_name,
+            trial_balance_df,
+            used_indexes=used_trial_indexes,
+        )
 
-        if match_rows.empty:
+        if match is None:
             matched_rows.append(
                 {
                     "Group": item.group_name,
@@ -281,17 +320,18 @@ def build_mapping_preview(mapping_file, trial_balance_file) -> Tuple[pd.DataFram
                 }
             )
         else:
-            matched_account_names = ", ".join(
-                sorted(match_rows["account_name"].dropna().astype(str).unique())
-            )
+            used_trial_indexes.add(match.name)
 
             matched_rows.append(
                 {
                     "Group": item.group_name,
                     "Mapping account": item.account_name,
-                    "Matched trial balance account": matched_account_names,
-                    "Current amount": match_rows["current_amount"].sum(),
-                    "Previous amount": match_rows["previous_amount"].sum(),
+                    "Matched trial balance account": match.get(
+                        "detail_account_name",
+                        match["account_name"],
+                    ),
+                    "Current amount": match["current_amount"],
+                    "Previous amount": match["previous_amount"],
                     "Status": "Matched",
                     "Mapping cell": item.cell,
                 }
