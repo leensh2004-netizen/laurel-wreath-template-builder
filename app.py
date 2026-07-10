@@ -4,8 +4,11 @@ import io
 
 import pandas as pd
 import streamlit as st
-from financial_mapper import build_mapping_preview
-
+from financial_mapper import (
+    build_mapping_preview,
+    get_trial_balance_options,
+    apply_reviewed_matches,
+)
 from document_engine import (
     POLICY_SECTIONS,
     NOTE_SECTIONS,
@@ -799,7 +802,7 @@ table_updates = {}
 
 
 with financial_tables_tab:
-    st.subheader("Automatic Excel mapping test / اختبار ربط الإكسل")
+    st.subheader("Automatic Excel mapping / ربط الإكسل تلقائياً")
 
     mapping_file = st.file_uploader(
         "Upload mapping Excel / ملف التحويل",
@@ -820,13 +823,95 @@ with financial_tables_tab:
                 trial_balance_file=trial_balance_file,
             )
 
-            st.success("Mapping test completed.")
+            st.session_state["mapping_preview_df"] = preview_df
+            st.session_state["mapping_summary_df"] = summary_df
+            st.session_state["trial_balance_options"] = get_trial_balance_options(
+                trial_balance_file
+            )
 
-            st.markdown("### Summary by group")
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            st.success("Mapping test completed. Please review the matches below.")
 
-            st.markdown("### Detailed matching preview")
-            st.dataframe(preview_df, use_container_width=True, hide_index=True)
+    if "mapping_preview_df" in st.session_state:
+        st.markdown("### Summary by group")
+        st.dataframe(
+            st.session_state["mapping_summary_df"],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.markdown("### Review and fix matching")
+        st.caption(
+            "If the suggested match is wrong or empty, choose the correct trial balance account from the dropdown."
+        )
+
+        edited_mapping_df = st.data_editor(
+            st.session_state["mapping_preview_df"],
+            use_container_width=True,
+            hide_index=True,
+            height=500,
+            column_order=[
+                "Group",
+                "Mapping account",
+                "User selected trial balance account",
+                "Current amount",
+                "Previous amount",
+                "Status",
+                "Mapping cell",
+            ],
+            column_config={
+                "Group": st.column_config.TextColumn(
+                    "Group",
+                    width="medium",
+                ),
+                "Mapping account": st.column_config.TextColumn(
+                    "Mapping account",
+                    width="medium",
+                ),
+                "User selected trial balance account": st.column_config.SelectboxColumn(
+                    "Choose trial balance account",
+                    options=st.session_state.get("trial_balance_options", [""]),
+                    required=False,
+                    width="large",
+                ),
+                "Current amount": st.column_config.NumberColumn(
+                    "Current",
+                    format="%.3f",
+                ),
+                "Previous amount": st.column_config.NumberColumn(
+                    "Previous",
+                    format="%.3f",
+                ),
+                "Status": st.column_config.TextColumn(
+                    "Status",
+                    width="small",
+                ),
+                "Mapping cell": st.column_config.TextColumn(
+                    "Cell",
+                    width="small",
+                ),
+            },
+            disabled=[
+                "Group",
+                "Mapping account",
+                "Current amount",
+                "Previous amount",
+                "Status",
+                "Mapping cell",
+            ],
+            key="mapping_review_editor",
+        )
+
+        if st.button("Apply reviewed matches"):
+            reviewed_df, reviewed_summary_df = apply_reviewed_matches(
+                edited_mapping_df,
+                trial_balance_file,
+            )
+
+            st.session_state["mapping_preview_df"] = reviewed_df
+            st.session_state["mapping_summary_df"] = reviewed_summary_df
+
+            st.success("Reviewed matches applied.")
+            st.rerun()
 
     st.divider()
 
