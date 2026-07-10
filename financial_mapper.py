@@ -44,6 +44,7 @@ def clean_text(value) -> str:
 
     return text.strip()
 
+
 def arabic_words(value) -> set:
     text = clean_text(value)
 
@@ -73,7 +74,8 @@ def arabic_words(value) -> set:
             words.append(word)
 
     return set(words)
-    
+
+
 def clean_number(value) -> float:
     if value is None:
         return 0.0
@@ -83,7 +85,6 @@ def clean_number(value) -> float:
     if not text or text.lower() == "nan":
         return 0.0
 
-    # Arabic/English accounting negative format: (123)
     negative = text.startswith("(") and text.endswith(")")
 
     text = (
@@ -103,11 +104,37 @@ def clean_number(value) -> float:
     return -number if negative else number
 
 
+def reset_file_pointer(file_obj) -> None:
+    try:
+        file_obj.seek(0)
+    except Exception:
+        pass
+
+
+def format_amount(value) -> str:
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        number = 0.0
+
+    if number == int(number):
+        return f"{int(number):,}"
+
+    return f"{number:,.3f}"
+
+
+def make_trial_balance_option(row) -> str:
+    detail = str(row.get("detail_account_name", "") or "").strip()
+    group = str(row.get("account_name", "") or "").strip()
+    current = format_amount(row.get("current_amount", 0))
+    previous = format_amount(row.get("previous_amount", 0))
+
+    label_name = detail or group
+
+    return f"{label_name} | {group} | Current: {current} | Previous: {previous}"
+
+
 def is_grey_or_filled_cell(cell) -> bool:
-    """
-    Detects parent/category cells in the mapping Excel.
-    Usually these are grey/dark filled cells.
-    """
     fill = cell.fill
 
     if not fill or fill.fill_type is None:
@@ -118,19 +145,21 @@ def is_grey_or_filled_cell(cell) -> bool:
     if not color:
         return False
 
-    # If it has any solid fill, treat it as a parent/category cell.
-    # This is safer than trying to guess exact grey color.
     return True
 
 
 def read_mapping_excel(mapping_file) -> List[MappingItem]:
     """
-    Reads the mapping Excel correctly:
+    Reads the mapping Excel.
+
+    Expected format:
     - Column A = code like A1, A1.1, L3.1
     - Column B = Arabic account/group name
     - Rows without dot like A1, A2, L3 are parent groups
     - Rows with dot like A1.1, A1.2 are detailed accounts
     """
+    reset_file_pointer(mapping_file)
+
     wb = load_workbook(mapping_file, data_only=True)
     ws = wb.active
 
@@ -151,12 +180,10 @@ def read_mapping_excel(mapping_file) -> List[MappingItem]:
         if desc.replace("*", "").strip() == "":
             continue
 
-        # Parent group rows: A1, A2, A6, L1, L3...
         if "." not in code:
             current_group = desc
             continue
 
-        # Detail rows: A1.1, A1.2, L3.1...
         if current_group:
             items.append(
                 MappingItem(
@@ -169,6 +196,7 @@ def read_mapping_excel(mapping_file) -> List[MappingItem]:
 
     return items
 
+
 def read_trial_balance(trial_balance_file) -> pd.DataFrame:
     """
     Reads the Laurel trial balance format.
@@ -180,30 +208,30 @@ def read_trial_balance(trial_balance_file) -> pd.DataFrame:
     - إسم الحساب = detailed account name
     - رقم الحساب = account number, ignored as amount
     """
+    reset_file_pointer(trial_balance_file)
+
     raw = pd.read_excel(trial_balance_file, header=None)
 
     header_row_index = None
     group_col = None
     current_col = None
     detail_col = None
-    account_no_col = None
 
     for r in range(min(20, len(raw))):
         row_values = [clean_text(v) for v in raw.iloc[r].values]
 
         for c, value in enumerate(row_values):
-            if "المجموعه" in value or "المجموعة" in str(raw.iloc[r, c]):
+            original_value = str(raw.iloc[r, c])
+
+            if "المجموعه" in value or "المجموعة" in original_value:
                 header_row_index = r
                 group_col = c
 
             if "النهائي" in value:
                 current_col = c
 
-            if "اسم الحساب" in value or "إسم الحساب" in str(raw.iloc[r, c]):
+            if "اسم الحساب" in value or "إسم الحساب" in original_value:
                 detail_col = c
-
-            if "رقم الحساب" in value:
-                account_no_col = c
 
     if header_row_index is None or group_col is None or current_col is None:
         return pd.DataFrame(
@@ -257,13 +285,11 @@ def find_best_match(
     if not target or trial_balance_df.empty:
         return None
 
-    # Add clean detail column if missing
     if "detail_account_name_clean" not in trial_balance_df.columns:
         trial_balance_df["detail_account_name_clean"] = trial_balance_df[
             "detail_account_name"
         ].apply(clean_text)
 
-    # 1. Exact match with detailed account name
     exact_detail = trial_balance_df[
         (~trial_balance_df.index.isin(used_indexes))
         & (trial_balance_df["detail_account_name_clean"] == target)
@@ -272,7 +298,6 @@ def find_best_match(
     if not exact_detail.empty:
         return exact_detail.iloc[0]
 
-    # 2. Exact match with group/account name
     exact_group = trial_balance_df[
         (~trial_balance_df.index.isin(used_indexes))
         & (trial_balance_df["account_name_clean"] == target)
@@ -281,7 +306,6 @@ def find_best_match(
     if not exact_group.empty:
         return exact_group.iloc[0]
 
-    # 3. Safe contains match on detailed account name only
     for idx, row in trial_balance_df.iterrows():
         if idx in used_indexes:
             continue
@@ -291,7 +315,6 @@ def find_best_match(
         if len(target) >= 6 and (target in detail or detail in target):
             return row
 
-    # 4. Smarter Arabic word overlap on detailed account name
     target_words = arabic_words(target)
 
     best_row = None
@@ -338,27 +361,33 @@ def build_mapping_preview(mapping_file, trial_balance_file) -> Tuple[pd.DataFram
                 {
                     "Group": item.group_name,
                     "Mapping account": item.account_name,
+                    "Suggested trial balance account": "",
+                    "User selected trial balance account": "",
                     "Matched trial balance account": "",
                     "Current amount": 0.0,
                     "Previous amount": 0.0,
-                    "Status": "Not matched",
+                    "Status": "Needs review",
                     "Mapping cell": item.cell,
                 }
             )
         else:
             used_trial_indexes.add(match.name)
 
+            match_label = make_trial_balance_option(match)
+
             matched_rows.append(
                 {
                     "Group": item.group_name,
                     "Mapping account": item.account_name,
+                    "Suggested trial balance account": match_label,
+                    "User selected trial balance account": match_label,
                     "Matched trial balance account": match.get(
                         "detail_account_name",
                         match["account_name"],
                     ),
                     "Current amount": match["current_amount"],
                     "Previous amount": match["previous_amount"],
-                    "Status": "Matched",
+                    "Status": "Auto matched",
                     "Mapping cell": item.cell,
                 }
             )
@@ -371,7 +400,7 @@ def build_mapping_preview(mapping_file, trial_balance_file) -> Tuple[pd.DataFram
         )
     else:
         summary_df = (
-            preview_df[preview_df["Status"] == "Matched"]
+            preview_df[preview_df["Status"] != "Needs review"]
             .groupby("Group", as_index=False)
             .agg(
                 {
@@ -390,3 +419,90 @@ def build_mapping_preview(mapping_file, trial_balance_file) -> Tuple[pd.DataFram
         )
 
     return preview_df, summary_df
+
+
+def get_trial_balance_options(trial_balance_file) -> List[str]:
+    trial_balance_df = read_trial_balance(trial_balance_file)
+
+    if trial_balance_df.empty:
+        return [""]
+
+    options = trial_balance_df.apply(make_trial_balance_option, axis=1).tolist()
+
+    return [""] + options
+
+
+def apply_reviewed_matches(
+    reviewed_df: pd.DataFrame,
+    trial_balance_file,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    trial_balance_df = read_trial_balance(trial_balance_file)
+
+    if trial_balance_df.empty:
+        return reviewed_df, pd.DataFrame(
+            columns=["Group", "Current total", "Previous total", "Matched accounts"]
+        )
+
+    trial_balance_df = trial_balance_df.copy()
+    trial_balance_df["trial_balance_option"] = trial_balance_df.apply(
+        make_trial_balance_option,
+        axis=1,
+    )
+
+    lookup = {
+        row["trial_balance_option"]: row
+        for _, row in trial_balance_df.iterrows()
+    }
+
+    updated_rows = []
+
+    for _, row in reviewed_df.iterrows():
+        selected = str(row.get("User selected trial balance account", "") or "").strip()
+
+        new_row = row.to_dict()
+
+        if selected and selected in lookup:
+            match = lookup[selected]
+
+            new_row["Matched trial balance account"] = match.get(
+                "detail_account_name",
+                match["account_name"],
+            )
+            new_row["Current amount"] = match["current_amount"]
+            new_row["Previous amount"] = match["previous_amount"]
+            new_row["Status"] = "Reviewed"
+        else:
+            new_row["Matched trial balance account"] = ""
+            new_row["Current amount"] = 0.0
+            new_row["Previous amount"] = 0.0
+            new_row["Status"] = "Needs review"
+
+        updated_rows.append(new_row)
+
+    updated_df = pd.DataFrame(updated_rows)
+
+    if updated_df.empty:
+        summary_df = pd.DataFrame(
+            columns=["Group", "Current total", "Previous total", "Matched accounts"]
+        )
+    else:
+        summary_df = (
+            updated_df[updated_df["Status"] != "Needs review"]
+            .groupby("Group", as_index=False)
+            .agg(
+                {
+                    "Current amount": "sum",
+                    "Previous amount": "sum",
+                    "Mapping account": "count",
+                }
+            )
+            .rename(
+                columns={
+                    "Current amount": "Current total",
+                    "Previous amount": "Previous total",
+                    "Mapping account": "Matched accounts",
+                }
+            )
+        )
+
+    return updated_df, summary_df
