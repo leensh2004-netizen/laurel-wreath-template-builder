@@ -96,43 +96,49 @@ def is_grey_or_filled_cell(cell) -> bool:
 
 def read_mapping_excel(mapping_file) -> List[MappingItem]:
     """
-    Reads the grey-cell mapping Excel.
-    Grey/filled cells are treated as parent groups.
-    Non-filled cells below each group are treated as mapped accounts.
+    Reads the mapping Excel correctly:
+    - Column A = code like A1, A1.1, L3.1
+    - Column B = Arabic account/group name
+    - Rows without dot like A1, A2, L3 are parent groups
+    - Rows with dot like A1.1, A1.2 are detailed accounts
     """
     wb = load_workbook(mapping_file, data_only=True)
+    ws = wb.active
+
     items: List[MappingItem] = []
+    current_group: Optional[str] = None
 
-    for ws in wb.worksheets:
-        max_row = ws.max_row
-        max_col = ws.max_column
+    for row in range(2, ws.max_row + 1):
+        code = str(ws.cell(row=row, column=1).value or "").strip()
+        desc = str(ws.cell(row=row, column=2).value or "").strip()
 
-        for col in range(1, max_col + 1):
-            current_group: Optional[str] = None
+        if not code or not desc:
+            continue
 
-            for row in range(1, max_row + 1):
-                cell = ws.cell(row=row, column=col)
-                value = str(cell.value or "").strip()
+        if code in ["A", "L"]:
+            current_group = None
+            continue
 
-                if not value:
-                    continue
+        if desc.replace("*", "").strip() == "":
+            continue
 
-                if is_grey_or_filled_cell(cell):
-                    current_group = value
-                    continue
+        # Parent group rows: A1, A2, A6, L1, L3...
+        if "." not in code:
+            current_group = desc
+            continue
 
-                if current_group:
-                    items.append(
-                        MappingItem(
-                            group_name=current_group,
-                            account_name=value,
-                            sheet_name=ws.title,
-                            cell=cell.coordinate,
-                        )
-                    )
+        # Detail rows: A1.1, A1.2, L3.1...
+        if current_group:
+            items.append(
+                MappingItem(
+                    group_name=current_group,
+                    account_name=desc,
+                    sheet_name=ws.title,
+                    cell=ws.cell(row=row, column=2).coordinate,
+                )
+            )
 
     return items
-
 
 def read_trial_balance(trial_balance_file) -> pd.DataFrame:
     """
