@@ -19,6 +19,7 @@ from pathlib import Path
 from docx.shared import Inches
 from cover_page_editor import update_cover_page
 from index_editor import update_page_two_and_index
+from index_table_editor import update_index_table
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "نموذج الايضاحات.docx"
 
@@ -1125,6 +1126,7 @@ def generate_document(
     all_keys = {s.key for s in ALL_SECTIONS}
     remove_keys = all_keys - included
     remove_sections(doc, remove_keys)
+    update_index_table(doc, included)
 
     if financial_note_values:
         apply_financial_note_values(doc, financial_note_values)
