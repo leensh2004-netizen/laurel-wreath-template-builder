@@ -260,6 +260,36 @@ def _replace_index_row(
         )
 
 
+def _ensure_auditor_report_index_paragraph(
+    doc: DocxDocument,
+) -> Optional[Paragraph]:
+    """
+    Ensure page 2 contains an index row for
+    'تقرير مدقق الحسابات المستقل'.
+
+    The template currently has no row for this title, so clone the
+    balance-sheet index row and insert the clone immediately before it.
+    """
+    existing = _find_index_paragraph(
+        doc,
+        "تقرير مدقق الحسابات المستقل",
+    )
+    if existing is not None:
+        return existing
+
+    balance_sheet_row = _find_index_paragraph(
+        doc,
+        "قائمة المركز المالي",
+    )
+    if balance_sheet_row is None:
+        return None
+
+    cloned_xml = deepcopy(balance_sheet_row._p)
+    balance_sheet_row._p.addprevious(cloned_xml)
+
+    return Paragraph(cloned_xml, balance_sheet_row._parent)
+
+
 def _find_index_paragraph(
     doc: DocxDocument,
     phrase: str,
@@ -335,6 +365,73 @@ def _find_last_body_paragraph(doc: DocxDocument) -> Optional[Paragraph]:
     return None
 
 
+def _ensure_section_break_before_paragraph(
+    doc: DocxDocument,
+    target_paragraph: Paragraph,
+) -> None:
+    """
+    Split the current Word section immediately before target_paragraph.
+
+    The original template keeps the cover, index and auditor report in one
+    section. PAGEREF cannot show the auditor report as page 1 unless the
+    report starts its own section.
+    """
+    body_children = list(doc.element.body.iterchildren())
+
+    try:
+        target_position = next(
+            index
+            for index, child in enumerate(body_children)
+            if child is target_paragraph._p
+        )
+    except StopIteration:
+        return
+
+    previous_paragraph_xml = None
+    for child in reversed(body_children[:target_position]):
+        if child.tag == qn("w:p"):
+            previous_paragraph_xml = child
+            break
+
+    if previous_paragraph_xml is None:
+        return
+
+    previous_p_pr = previous_paragraph_xml.find(qn("w:pPr"))
+    if previous_p_pr is not None:
+        existing_section = previous_p_pr.find(qn("w:sectPr"))
+        if existing_section is not None:
+            return
+
+    target_section_properties = None
+    for child in body_children[target_position:]:
+        if child.tag == qn("w:p"):
+            p_pr = child.find(qn("w:pPr"))
+            if p_pr is not None:
+                sect_pr = p_pr.find(qn("w:sectPr"))
+                if sect_pr is not None:
+                    target_section_properties = sect_pr
+                    break
+        elif child.tag == qn("w:sectPr"):
+            target_section_properties = child
+            break
+
+    if target_section_properties is None:
+        return
+
+    if previous_p_pr is None:
+        previous_p_pr = OxmlElement("w:pPr")
+        previous_paragraph_xml.insert(0, previous_p_pr)
+
+    previous_section = deepcopy(target_section_properties)
+
+    # Do not carry a page-number restart back to the cover/index section.
+    previous_page_number_type = previous_section.find(qn("w:pgNumType"))
+    if previous_page_number_type is not None:
+        previous_section.remove(previous_page_number_type)
+
+    previous_p_pr.append(previous_section)
+
+
 def _restart_financial_page_numbering(
     doc: DocxDocument,
     first_financial_title: Paragraph,
@@ -345,6 +442,11 @@ def _restart_financial_page_numbering(
 
     PAGEREF then returns report page numbers instead of cover/report pages.
     """
+    _ensure_section_break_before_paragraph(
+        doc,
+        first_financial_title,
+    )
+
     found_target = False
     target_section_properties = None
 
@@ -381,6 +483,35 @@ def _restart_financial_page_numbering(
     page_number_type.set(qn("w:start"), "1")
     page_number_type.set(qn("w:fmt"), "decimal")
 
+    # Continue page numbering through every later section. The template
+    # originally restarts numbering again at the balance sheet, which would
+    # otherwise make both the auditor report and balance sheet show page 1.
+    passed_report_section = False
+
+    for child in doc.element.body.iterchildren():
+        section_properties = None
+
+        if child.tag == qn("w:p"):
+            paragraph_properties = child.find(qn("w:pPr"))
+            if paragraph_properties is not None:
+                section_properties = paragraph_properties.find(qn("w:sectPr"))
+        elif child.tag == qn("w:sectPr"):
+            section_properties = child
+
+        if section_properties is None:
+            continue
+
+        if section_properties is target_section_properties:
+            passed_report_section = True
+            continue
+
+        if not passed_report_section:
+            continue
+
+        later_page_number_type = section_properties.find(qn("w:pgNumType"))
+        if later_page_number_type is not None:
+            section_properties.remove(later_page_number_type)
+
 
 def _enable_field_updates(doc: DocxDocument) -> None:
     """
@@ -405,40 +536,49 @@ def update_page_two_and_index(
     Main entry point.
 
     1. Fill page-2 heading from the Basic info / first-page values.
-    2. Bookmark the real financial-statement titles.
-    3. Replace hard-coded index numbers with automatic PAGEREF fields.
-    4. Make the notes page range automatic from first note to document end.
+    2. Add the independent auditor report as page 1 in the index.
+    3. Bookmark the report and financial-statement titles.
+    4. Replace hard-coded index numbers with automatic PAGEREF fields.
+    5. Make the notes page range automatic from first note to document end.
     """
     _update_page_two_heading(doc, form)
 
+    auditor_index = _ensure_auditor_report_index_paragraph(doc)
+
     index_and_target_titles = [
+        (
+            "تقرير مدقق الحسابات المستقل",
+            "تقرير مدقق الحسابات المستقل",
+            "lw_auditor_report",
+            "1",
+        ),
         (
             "قائمة المركز المالي",
             "قائمة المركز المالي",
             "lw_balance_sheet",
-            "1",
+            "4",
         ),
         (
             "قائمة الدخل الشامل",
             "قائمة الدخل الشامل",
             "lw_income_statement",
-            "2",
+            "5",
         ),
         (
             "قائمة التغيرات في حقوق الملكية",
             "قائمة التغيرات في حقوق الملكية",
             "lw_equity_changes",
-            "3",
+            "7",
         ),
         (
             "قائمة التدفقات النقدية",
             "قائمة التدفقات النقدية",
             "lw_cash_flows",
-            "4",
+            "8",
         ),
     ]
 
-    first_financial_title = None
+    first_report_title = None
 
     for (
         index_title,
@@ -446,14 +586,23 @@ def update_page_two_and_index(
         bookmark_name,
         cached_page_number,
     ) in index_and_target_titles:
-        index_paragraph = _find_index_paragraph(doc, index_title)
-        target_paragraph = _find_exact_title_paragraph(doc, target_title)
+        if index_title == "تقرير مدقق الحسابات المستقل":
+            index_paragraph = auditor_index
+            target_paragraph = None
+
+            for paragraph in doc.paragraphs:
+                if _match_text(paragraph.text) == _match_text(target_title):
+                    target_paragraph = paragraph
+                    break
+        else:
+            index_paragraph = _find_index_paragraph(doc, index_title)
+            target_paragraph = _find_exact_title_paragraph(doc, target_title)
 
         if index_paragraph is None or target_paragraph is None:
             continue
 
-        if first_financial_title is None:
-            first_financial_title = target_paragraph
+        if index_title == "تقرير مدقق الحسابات المستقل":
+            first_report_title = target_paragraph
 
         _add_bookmark(doc, target_paragraph, bookmark_name)
 
@@ -487,10 +636,10 @@ def update_page_two_and_index(
             ],
         )
 
-    if first_financial_title is not None:
+    if first_report_title is not None:
         _restart_financial_page_numbering(
             doc,
-            first_financial_title,
+            first_report_title,
         )
 
     _enable_field_updates(doc)
