@@ -442,6 +442,20 @@ with main_tab:
 
     with c1:
         company_name = st.text_input("Company name / اسم الشركة")
+                legal_form = st.text_input(
+            "Legal form on cover page / الشكل القانوني في الصفحة الأولى",
+            value="(ذات مسؤولية محدودة)",
+        )
+
+        statements_title = st.text_input(
+            "Cover page statements title / عنوان القوائم في الصفحة الأولى",
+            value="القوائم الماليــة المنفصلة للسنة المالية المنتهية في",
+        )
+
+        cover_date = st.text_input(
+            "Cover page date / تاريخ الصفحة الأولى",
+            value="30 حزيران 2025",
+        )
 
         company_type = st.selectbox(
             "Company type / نوع الشركة",
@@ -940,6 +954,9 @@ with generate_tab:
         "audit_license": audit_license,
         "audit_date": audit_date,
         "important_partner_threshold": important_partner_threshold,
+        "legal_form": legal_form,
+        "statements_title": statements_title,
+        "cover_date": cover_date,
     }
 
     selected_important_names = set(selected_important_partner_names)
