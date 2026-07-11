@@ -442,7 +442,8 @@ with main_tab:
 
     with c1:
         company_name = st.text_input("Company name / اسم الشركة")
-                legal_form = st.text_input(
+
+        legal_form = st.text_input(
             "Legal form on cover page / الشكل القانوني في الصفحة الأولى",
             value="(ذات مسؤولية محدودة)",
         )
