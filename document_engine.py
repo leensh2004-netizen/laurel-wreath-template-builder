@@ -18,6 +18,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from pathlib import Path
 from docx.shared import Inches
 from cover_page_editor import update_cover_page
+from index_editor import update_page_two_and_index
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "نموذج الايضاحات.docx"
 
@@ -1146,7 +1147,7 @@ def generate_document(
     if clear_replaced_format:
         remove_red_and_highlight_everywhere(doc)
 
+    update_page_two_and_index(doc, form)
     bio = io.BytesIO()
     doc.save(bio)
-    bio.seek(0)
     return bio.getvalue()
