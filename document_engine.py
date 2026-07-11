@@ -17,6 +17,7 @@ from docx.table import _Cell, Table
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from pathlib import Path
 from docx.shared import Inches
+from cover_page_editor import update_cover_page
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "نموذج الايضاحات.docx"
 
@@ -1105,6 +1106,7 @@ def generate_document(
 
     replacements = build_replacements(form)
     apply_replacements(doc, replacements, clear_replaced_format)
+    update_cover_page(doc, form)
 
     fill_auditor_table(doc, form)
     fill_partners_table(doc, partners)
